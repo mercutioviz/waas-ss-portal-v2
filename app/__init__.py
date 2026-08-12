@@ -2,6 +2,7 @@ import os
 import logging
 from flask import Flask, render_template, request, session
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_login import LoginManager, current_user
 from flask_babel import Babel
 from flask_limiter import Limiter
@@ -15,6 +16,7 @@ from datetime import datetime
 
 # Initialize extensions
 db = SQLAlchemy()
+migrate = Migrate()
 login_manager = LoginManager()
 babel = Babel()
 limiter = Limiter(key_func=get_remote_address, default_limits=["60 per minute"], storage_uri="memory://")
@@ -73,6 +75,9 @@ def create_app(config_name='default'):
 
     # Initialize extensions with app
     db.init_app(app)
+    # render_as_batch=True enables SQLite ALTER TABLE via copy-and-swap; required
+    # for any column drop/type-change migration on our SQLite portal DB.
+    migrate.init_app(app, db, render_as_batch=True)
     login_manager.init_app(app)
     babel.init_app(app, locale_selector=get_locale)
     limiter.init_app(app)
@@ -217,41 +222,47 @@ def create_app(config_name='default'):
     def handle_500(e):
         return render_template('errors/500.html'), 500
 
-    # Create database tables
-    with app.app_context():
-        db.create_all()
+    # SKIP_DB_INIT=1 disables the eager create_all / manual ALTER / seed block.
+    # Alembic (flask db …) and pytest set this so autogenerate sees the models
+    # against a clean DB rather than one already provisioned by create_all.
+    if not os.environ.get('SKIP_DB_INIT'):
+        with app.app_context():
+            db.create_all()
 
-        # Manual ALTER TABLE migrations for SQLite (add columns if missing)
-        import sqlite3
-        _db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
-        if _db_path and os.path.exists(_db_path):
-            _conn = sqlite3.connect(_db_path)
-            _cursor = _conn.cursor()
-            _migrations = [
-                ('waas_accounts', 'api_key_expiry', 'DATE'),
-                ('users', 'notify_apikey_expiry_email', 'BOOLEAN DEFAULT 1'),
-                ('users', 'notify_apikey_expiry_inapp', 'BOOLEAN DEFAULT 1'),
-            ]
-            for _table, _col, _coltype in _migrations:
-                try:
-                    _cursor.execute(f'ALTER TABLE {_table} ADD COLUMN {_col} {_coltype}')
-                except sqlite3.OperationalError:
-                    pass  # column already exists
-            _conn.commit()
-            _conn.close()
+            # Manual ALTER TABLE migrations for SQLite (add columns if missing).
+            # Kept for now so existing deployments continue to self-heal; new
+            # schema changes should go through Alembic (flask db migrate).
+            import sqlite3
+            _db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
+            if _db_path and os.path.exists(_db_path):
+                _conn = sqlite3.connect(_db_path)
+                _cursor = _conn.cursor()
+                _migrations = [
+                    ('waas_accounts', 'api_key_expiry', 'DATE'),
+                    ('users', 'notify_apikey_expiry_email', 'BOOLEAN DEFAULT 1'),
+                    ('users', 'notify_apikey_expiry_inapp', 'BOOLEAN DEFAULT 1'),
+                ]
+                for _table, _col, _coltype in _migrations:
+                    try:
+                        _cursor.execute(f'ALTER TABLE {_table} ADD COLUMN {_col} {_coltype}')
+                    except sqlite3.OperationalError:
+                        pass  # column already exists
+                _conn.commit()
+                _conn.close()
 
-        # Initialize default system settings if not present
-        from app.models import SystemSettings
-        if not SystemSettings.get_setting('app_name'):
-            SystemSettings.set_setting(
-                'app_name',
-                'WaaS Self-Service Portal',
-                value_type='string',
-                user_id=None
-            )
+            # Initialize default system settings if not present
+            from app.models import SystemSettings
+            if not SystemSettings.get_setting('app_name'):
+                SystemSettings.set_setting(
+                    'app_name',
+                    'WaaS Self-Service Portal',
+                    value_type='string',
+                    user_id=None
+                )
 
-    # Start scheduler (avoid double-start in debug reloader)
-    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    # Start scheduler (avoid double-start in debug reloader; skip under pytest)
+    if (not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true') \
+            and not app.config.get('TESTING'):
         from app.report_service import run_scheduled_reports
 
         scheduler.init_app(app)
