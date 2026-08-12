@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Cloning Application — Progress') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Applications'), url_for('applications.list_applications')),
+    (_('Clone Progress'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-3">
+    <h2><i class="bi bi-copy"></i> {{ _('Cloning Application') }}</h2>
+    <p class="text-muted">{{ source_name }} &rarr; {{ new_name }}</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="mb-3">
+            <div class="d-flex justify-content-between mb-1">
+                <span id="statusMessage">{{ _('Connecting...') }}</span>
+                <span id="progressCount"></span>
+            </div>
+            <div class="progress" style="height: 24px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar"
+                     role="progressbar" style="width: 0%">0%</div>
+            </div>
+        </div>
+
+        <div id="stepsList" class="mt-3">
+            {% for step_name in step_names %}
+            <div class="d-flex align-items-center mb-2" id="step-{{ loop.index }}">
+                <span class="spinner-border spinner-border-sm text-muted me-2 d-none" id="step-spinner-{{ loop.index }}"></span>
+                <i class="bi bi-circle text-muted me-2" id="step-icon-{{ loop.index }}"></i>
+                <span>{{ step_name }}</span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div id="completionArea" class="d-none mt-4">
+            <hr>
+            <div id="successArea" class="d-none">
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> {{ _('Application cloned successfully!') }}
+                </div>
+                <a href="#" id="viewNewAppLink" class="btn btn-primary">
+                    <i class="bi bi-globe"></i> {{ _('View New Application') }}
+                </a>
+            </div>
+            <div id="failArea" class="d-none">
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> <span id="failReason">{{ _('Clone failed.') }}</span>
+                    <div id="apiDetailsBlock" class="d-none mt-2">
+                        <details>
+                            <summary>{{ _('API Request/Response Details') }}</summary>
+                            <div class="mt-2" style="font-size: 0.85em;">
+                                <p class="mb-1" id="apiDetailRequest"></p>
+                                <p class="mb-1" id="apiDetailStatus"></p>
+                                <div id="apiDetailRequestBodyBlock" class="d-none">
+                                    <p class="mb-1"><strong>{{ _('Request Body') }}:</strong></p>
+                                    <pre class="bg-dark text-light p-2 rounded" style="max-height: 300px; overflow: auto;" id="apiDetailRequestBody"></pre>
+                                </div>
+                                <div id="apiDetailResponseBodyBlock" class="d-none">
+                                    <p class="mb-1"><strong>{{ _('Response Body') }}:</strong></p>
+                                    <pre class="bg-dark text-light p-2 rounded" style="max-height: 300px; overflow: auto;" id="apiDetailResponseBody"></pre>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+                <a href="{{ url_for('applications.list_applications', account_id=account_id) }}" class="btn btn-secondary">
+                    <i class="bi bi-arrow-left"></i> {{ _('Back to Applications') }}
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function() {
+    var sessionId = {{ session_id|tojson }};
+    var accountId = {{ account_id|tojson }};
+    var newName = {{ new_name|tojson }};
+    var socket = io();
+
+    socket.on('connect', function() {
+        socket.emit('join', {room: sessionId});
+        document.getElementById('statusMessage').textContent = '{{ _("Starting clone...") }}';
+    });
+
+    function setStepIcon(stepNum, icon, color) {
+        var iconEl = document.getElementById('step-icon-' + stepNum);
+        var spinnerEl = document.getElementById('step-spinner-' + stepNum);
+        if (spinnerEl) spinnerEl.classList.add('d-none');
+        if (iconEl) {
+            iconEl.className = 'bi me-2 ' + icon + ' text-' + color;
+        }
+    }
+
+    function setStepActive(stepNum) {
+        var spinnerEl = document.getElementById('step-spinner-' + stepNum);
+        var iconEl = document.getElementById('step-icon-' + stepNum);
+        if (spinnerEl) spinnerEl.classList.remove('d-none');
+        if (iconEl) iconEl.classList.add('d-none');
+    }
+
+    function showApiDetails(apiDetails) {
+        if (!apiDetails) return;
+        var block = document.getElementById('apiDetailsBlock');
+        block.classList.remove('d-none');
+        if (apiDetails.method && apiDetails.url) {
+            document.getElementById('apiDetailRequest').innerHTML =
+                '<strong>Request:</strong> <code>' + apiDetails.method + ' ' + apiDetails.url + '</code>';
+        }
+        if (apiDetails.status_code) {
+            document.getElementById('apiDetailStatus').innerHTML =
+                '<strong>Status Code:</strong> <code>' + apiDetails.status_code + '</code>';
+        }
+        if (apiDetails.request_data) {
+            document.getElementById('apiDetailRequestBodyBlock').classList.remove('d-none');
+            document.getElementById('apiDetailRequestBody').textContent =
+                JSON.stringify(apiDetails.request_data, null, 2);
+        }
+        if (apiDetails.response_data) {
+            document.getElementById('apiDetailResponseBodyBlock').classList.remove('d-none');
+            document.getElementById('apiDetailResponseBody').textContent =
+                JSON.stringify(apiDetails.response_data, null, 2);
+        }
+    }
+
+    socket.on('clone_progress', function(data) {
+        var bar = document.getElementById('progressBar');
+        var status = document.getElementById('statusMessage');
+
+        if (data.phase === 'step_start') {
+            status.textContent = data.step_name + '...';
+            bar.style.width = data.percent + '%';
+            bar.textContent = data.percent + '%';
+            setStepActive(data.step);
+        } else if (data.phase === 'step_complete') {
+            var isOk = data.result && data.result.status === 'success';
+            setStepIcon(data.step, isOk ? 'bi-check-circle-fill' : 'bi-x-circle-fill', isOk ? 'success' : 'danger');
+            bar.style.width = data.percent + '%';
+            bar.textContent = data.percent + '%';
+        } else if (data.phase === 'completed') {
+            bar.style.width = '100%';
+            bar.textContent = '100%';
+            bar.classList.remove('progress-bar-animated');
+            status.textContent = '{{ _("Complete") }}';
+
+            document.getElementById('completionArea').classList.remove('d-none');
+            if (data.success) {
+                bar.classList.add('bg-success');
+                document.getElementById('successArea').classList.remove('d-none');
+                document.getElementById('viewNewAppLink').href = '/applications/' + accountId + '/' + encodeURIComponent(newName);
+            } else {
+                bar.classList.add('bg-danger');
+                document.getElementById('failArea').classList.remove('d-none');
+                if (data.results && data.results.length) {
+                    var failedStep = data.results.find(function(r) { return r.api_details; });
+                    if (failedStep) showApiDetails(failedStep.api_details);
+                }
+            }
+            socket.disconnect();
+        } else if (data.phase === 'aborted') {
+            bar.classList.remove('progress-bar-animated');
+            bar.classList.add('bg-danger');
+            status.textContent = '{{ _("Failed") }}';
+            document.getElementById('completionArea').classList.remove('d-none');
+            document.getElementById('failArea').classList.remove('d-none');
+            document.getElementById('failReason').textContent = data.reason || '{{ _("Clone aborted.") }}';
+            // Show API details from the failed step
+            if (data.results && data.results.length) {
+                var failedStep = data.results.find(function(r) { return r.api_details; });
+                if (failedStep) showApiDetails(failedStep.api_details);
+            }
+            socket.disconnect();
+        }
+    });
+
+    socket.on('connect_error', function() {
+        document.getElementById('statusMessage').textContent = '{{ _("Connection lost.") }}';
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% from "macros/forms.html" import render_field, render_submit %}
+<div class="card">
+    <div class="card-body">
+        <form method="POST" class="needs-validation" novalidate>
+            {{ form.hidden_tag() }}
+            {{ render_field(form.name) }}
+            {{ render_field(form.description) }}
+
+            {% if current_user.is_admin %}
+            {{ render_field(form.is_global, help=_('Global templates are visible to all users.')) }}
+            {% endif %}
+
+            {{ render_submit(form, cancel_url=cancel_url) }}
+        </form>
+    </div>
+</div>

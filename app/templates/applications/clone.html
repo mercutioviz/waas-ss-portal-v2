@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field, render_submit %}
+{% block title %}{{ _('Clone Application') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Applications'), url_for('applications.list_applications')),
+    (account.account_name, url_for('applications.list_applications', account_id=account.id)),
+    (app_id, url_for('applications.view_application', account_id=account.id, app_id=app_id)),
+    (_('Clone'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-7">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2><i class="bi bi-copy"></i> {{ _('Clone Application') }}</h2>
+            <a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+        </div>
+
+        {% if api_error %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <strong><i class="bi bi-exclamation-triangle"></i> {{ _('API Error') }}:</strong> {{ api_error.message }}
+            <details class="mt-2">
+                <summary>{{ _('API Request/Response Details') }}</summary>
+                <div class="mt-2" style="font-size: 0.85em;">
+                    {% if api_error.method and api_error.url %}
+                    <p class="mb-1"><strong>{{ _('Request') }}:</strong> <code>{{ api_error.method }} {{ api_error.url }}</code></p>
+                    {% endif %}
+                    {% if api_error.status_code %}
+                    <p class="mb-1"><strong>{{ _('Status Code') }}:</strong> <code>{{ api_error.status_code }}</code></p>
+                    {% endif %}
+                    {% if api_error.request_data %}
+                    <p class="mb-1"><strong>{{ _('Request Body') }}:</strong></p>
+                    <pre class="bg-dark text-light p-2 rounded" style="max-height: 300px; overflow: auto;">{{ api_error.request_data | tojson(indent=2) }}</pre>
+                    {% endif %}
+                    {% if api_error.response_data %}
+                    <p class="mb-1"><strong>{{ _('Response Body') }}:</strong></p>
+                    <pre class="bg-dark text-light p-2 rounded" style="max-height: 300px; overflow: auto;">{{ api_error.response_data | tojson(indent=2) }}</pre>
+                    {% endif %}
+                </div>
+            </details>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endif %}
+
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i>
+            {{ _('This will create a new application based on <strong>%(name)s</strong>. The new app will be created via the v2 API, then source configuration will be imported.', name=source_app.get('name', app_id)) }}
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('New Application Settings') }}</h5></div>
+            <div class="card-body">
+                <form method="POST" data-loading="{{ _('Cloning application...') }}">
+                    {{ form.hidden_tag() }}
+
+                    <h6 class="text-muted mb-3"><span class="badge bg-primary rounded-pill me-1">1</span> {{ _('New Application Settings') }}</h6>
+                    {{ render_field(form.new_name) }}
+                    {{ render_field(form.new_hostname) }}
+
+                    <hr>
+                    <h6 class="text-muted mb-3"><span class="badge bg-primary rounded-pill me-1">2</span> {{ _('Backend Configuration') }}</h6>
+                    <div class="row">
+                        <div class="col-md-6">
+                            {{ render_field(form.backend_ip) }}
+                        </div>
+                        <div class="col-md-3">
+                            {{ render_field(form.backend_port) }}
+                        </div>
+                        <div class="col-md-3">
+                            {{ render_field(form.backend_type) }}
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h6 class="text-muted mb-3"><span class="badge bg-primary rounded-pill me-1">3</span> {{ _('What to Clone') }}</h6>
+
+                    <div class="form-check form-switch mb-2">
+                        {{ form.clone_security() }}
+                        {{ form.clone_security.label(class="form-check-label") }}
+                        <div class="form-text">{{ _('Protection mode, request limits, clickjacking, data theft settings') }}</div>
+                    </div>
+
+                    <div class="form-check form-switch mb-2">
+                        {{ form.clone_servers() }}
+                        {{ form.clone_servers.label(class="form-check-label") }}
+                        <div class="form-text">{{ _('Backend server definitions (host, port, SSL, health checks)') }}</div>
+                    </div>
+
+                    <div class="form-check form-switch mb-2">
+                        {{ form.clone_endpoints() }}
+                        {{ form.clone_endpoints.label(class="form-check-label") }}
+                        <div class="form-text">{{ _('Frontend ports, TLS versions, cipher suites') }}</div>
+                    </div>
+
+                    <div class="form-check mb-3 mt-3">
+                        <input class="form-check-input" type="checkbox" name="use_websocket" value="1" id="useWebsocket" checked>
+                        <label class="form-check-label" for="useWebsocket">{{ _('Show real-time progress') }}</label>
+                    </div>
+
+                    {{ render_submit(form, cancel_url=url_for('applications.view_application', account_id=account.id, app_id=app_id)) }}
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

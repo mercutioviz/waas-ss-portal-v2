@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "macros/forms.html" import render_field %}
+{% block title %}{{ _('Replace Certificate') }} — {{ account.account_name }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('certificates.list_certificates') }}">{{ _('Certificates') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('certificates.list_certificates', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Replace') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <h2><i class="bi bi-arrow-repeat"></i> {{ _('Replace Certificate') }}</h2>
+    <a href="{{ url_for('certificates.list_certificates', account_id=account.id) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> {{ _('Back to Certificates') }}
+    </a>
+</div>
+
+{% if old_cert %}
+<div class="alert alert-warning mb-4">
+    <i class="bi bi-exclamation-triangle"></i>
+    {{ _('You are replacing') }} <strong>{{ old_cert.get('name', cert_id) }}</strong>
+    {% if old_cert.get('common_name') or old_cert.get('commonName') %}
+    ({{ old_cert.get('common_name', old_cert.get('commonName')) }})
+    {% endif %}
+    {{ _('in application') }} <strong>{{ app_name }}</strong>.
+    {{ _('The old certificate will be deleted after the new one is uploaded.') }}
+</div>
+{% else %}
+<div class="alert alert-info mb-4">
+    <i class="bi bi-info-circle"></i>
+    {{ _('Replacing certificate') }} <strong>{{ cert_id }}</strong> {{ _('in application') }} <strong>{{ app_name }}</strong>.
+</div>
+{% endif %}
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">{{ _('Replacement Certificate') }}</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data" data-loading="{{ _('Uploading replacement certificate...') }}">
+                    {{ form.hidden_tag() }}
+
+                    {{ render_field(form.certificate_file, help=_('Supported formats: PEM, PFX/P12, CRT, CER, KEY')) }}
+                    {{ render_field(form.certificate_key_file, help=_('Required for PEM certificates. Not needed for PFX/P12 files that already contain the key.')) }}
+                    {{ render_field(form.pfx_password, help=_('Only required if uploading a password-protected PFX/P12 file.')) }}
+                    {{ render_field(form.friendly_name, help=_('An optional label to help identify this certificate in the portal.')) }}
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-primary">{{ _('Replace Certificate') }}</button>
+                        <a href="{{ url_for('certificates.list_certificates', account_id=account.id) }}" class="btn btn-outline-secondary">{{ _('Cancel') }}</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        {% if old_cert %}
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-earmark-lock"></i> {{ _('Current Certificate') }}</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0 small">
+                    <dt class="col-sm-5">{{ _('Name') }}</dt>
+                    <dd class="col-sm-7">{{ old_cert.get('name', cert_id) }}</dd>
+                    {% set cn = old_cert.get('common_name', old_cert.get('commonName', '')) %}
+                    {% if cn %}
+                    <dt class="col-sm-5">{{ _('Common Name') }}</dt>
+                    <dd class="col-sm-7">{{ cn }}</dd>
+                    {% endif %}
+                    {% set expiry = old_cert.get('expiry', old_cert.get('expiryDate', '')) %}
+                    {% if expiry %}
+                    <dt class="col-sm-5">{{ _('Expires') }}</dt>
+                    <dd class="col-sm-7">{{ expiry }}</dd>
+                    {% endif %}
+                    <dt class="col-sm-5">{{ _('Application') }}</dt>
+                    <dd class="col-sm-7">{{ app_name }}</dd>
+                </dl>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> {{ _('Upload Tips') }}</h5>
+            </div>
+            <div class="card-body">
+                <h6>{{ _('PEM Format') }}</h6>
+                <ul class="small">
+                    <li>{{ _('Upload the certificate file') }} (<code>.pem</code> {{ _('or') }} <code>.crt</code>)</li>
+                    <li>{{ _('Upload the private key file separately') }} (<code>.pem</code> {{ _('or') }} <code>.key</code>)</li>
+                    <li>{{ _('Include intermediate certificates in the certificate file if needed') }}</li>
+                </ul>
+
+                <h6>{{ _('PFX/P12 Format') }}</h6>
+                <ul class="small">
+                    <li>{{ _('Upload the') }} <code>.pfx</code> {{ _('or') }} <code>.p12</code> {{ _('file as the certificate') }}</li>
+                    <li>{{ _('No separate key file is needed') }}</li>
+                    <li>{{ _('Provide the PFX password if the file is password-protected') }}</li>
+                </ul>
+
+                <div class="alert alert-danger small mt-3 mb-0">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    {{ _('The existing certificate will be permanently deleted after the new one is uploaded successfully.') }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

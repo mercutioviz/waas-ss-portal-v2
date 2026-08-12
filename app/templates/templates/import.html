@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Import Template') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('templates.list_templates') }}">{{ _('Config Templates') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Import') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-upload"></i> {{ _('Import Template') }}</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">{{ _('Upload a JSON file previously exported from this portal to create a new template.') }}</p>
+
+                <form method="POST" enctype="multipart/form-data" data-loading="{{ _('Importing template...') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="mb-3">
+                        <label for="template_file" class="form-label">{{ _('Template File') }}</label>
+                        <input type="file" class="form-control" id="template_file" name="template_file" accept=".json" required>
+                        <div class="form-text">{{ _('Accepted format: .json') }}</div>
+                    </div>
+
+                    <div class="alert alert-info py-2 small">
+                        <i class="bi bi-info-circle"></i>
+                        {{ _('The JSON file must contain at minimum a "name" (string) and "config_data" (object) field.') }}
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> {{ _('Import') }}</button>
+                        <a href="{{ url_for('templates.list_templates') }}" class="btn btn-outline-secondary">{{ _('Cancel') }}</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('DNS Info') }} — {{ application.get('name', 'Application') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Applications'), url_for('applications.list_applications')),
+    (account.account_name, url_for('applications.list_applications', account_id=account.id)),
+    (application.get('name', app_id), url_for('applications.view_application', account_id=account.id, app_id=app_id)),
+    (_('DNS'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <h2><i class="bi bi-diagram-3"></i> {{ _('DNS / CNAME Information') }}</h2>
+    <a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> {{ _('Back to Application') }}
+    </a>
+</div>
+
+<div class="mb-3">
+    <span class="text-muted">{{ _('Account:') }}</span> <strong>{{ account.account_name }}</strong>
+    <span class="text-muted ms-3">{{ _('Application:') }}</span> <strong>{{ application.get('name', 'N/A') }}</strong>
+</div>
+
+{% if dns %}
+
+{# CNAME Record #}
+{% set cname = dns.get('cname', dns.get('CNAME', '')) %}
+{% if cname %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-signpost-2"></i> {{ _('CNAME Record') }}</h5>
+    </div>
+    <div class="card-body">
+        <p class="text-muted mb-2">{{ _('Point your domain\'s DNS to the following CNAME to route traffic through WaaS:') }}</p>
+        <div class="bg-light rounded p-3">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <small class="text-muted d-block">{{ _('Your Domain') }}</small>
+                    <strong><code>{{ application.get('name', 'your-domain.com') }}</code></strong>
+                </div>
+                <div class="col-md-1 text-center">
+                    <i class="bi bi-arrow-right fs-4 text-primary"></i>
+                </div>
+                <div class="col-md-7">
+                    <small class="text-muted d-block">{{ _('CNAME Target') }}</small>
+                    <strong><code class="text-primary fs-5">{{ cname }}</code></strong>
+                    <button type="button" class="btn btn-sm btn-link p-0 ms-2" onclick="copyToClipboard('{{ cname }}')" title="{{ _('Copy') }}"><i class="bi bi-clipboard"></i></button>
+                </div>
+            </div>
+        </div>
+        <div class="mt-2">
+            <small class="text-muted">
+                <i class="bi bi-info-circle"></i>
+                {{ _('Create a CNAME record in your DNS provider pointing your domain to the target above. DNS changes may take up to 24–48 hours to fully propagate.') }}
+            </small>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# DNS Details Table #}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-card-list"></i> {{ _('DNS Details') }}</h5>
+    </div>
+    <div class="card-body">
+        <table class="table table-borderless mb-0">
+            {% for key, value in dns.items() %}
+            <tr>
+                <th style="width:35%">{{ key | replace('_', ' ') | title }}</th>
+                <td>
+                    {% if value is mapping %}
+                    <pre class="mb-0 bg-light p-2 rounded small"><code>{{ value|tojson(indent=2) }}</code></pre>
+                    {% elif value is iterable and value is not string %}
+                    <ul class="list-unstyled mb-0">
+                        {% for item in value %}
+                        <li><code>{{ item }}</code></li>
+                        {% endfor %}
+                    </ul>
+                    {% elif value %}
+                    <code>{{ value }}</code>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+{# DNS Status / Verification #}
+{% set dns_status = dns.get('status', dns.get('dns_status', '')) %}
+{% set is_verified = dns.get('verified', dns.get('is_verified', None)) %}
+{% if dns_status or is_verified is not none %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-check2-circle"></i> {{ _('DNS Status') }}</h5>
+    </div>
+    <div class="card-body">
+        {% if dns_status %}
+        <div class="mb-2">
+            <strong>{{ _('Status:') }}</strong>
+            {% if dns_status == 'active' or dns_status == 'Active' or dns_status == 'verified' %}
+            <span class="badge bg-success"><i class="bi bi-check-circle"></i> {{ dns_status }}</span>
+            {% elif dns_status == 'pending' or dns_status == 'Pending' %}
+            <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split"></i> {{ dns_status }}</span>
+            {% else %}
+            <span class="badge bg-secondary">{{ dns_status }}</span>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if is_verified is not none %}
+        <div>
+            <strong>{{ _('Verified:') }}</strong>
+            {% if is_verified %}
+            <span class="badge bg-success"><i class="bi bi-patch-check"></i> {{ _('Yes') }}</span>
+            {% else %}
+            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle"></i> {{ _('Not Yet') }}</span>
+            <p class="text-muted small mt-1 mb-0">
+                {{ _('Ensure your CNAME record is configured correctly and allow time for DNS propagation.') }}
+            </p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{# Raw DNS Data #}
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#rawDnsData" role="button">
+                <i class="bi bi-code-slash"></i> {{ _('Raw API Data') }}
+            </a>
+        </h5>
+    </div>
+    <div class="collapse" id="rawDnsData">
+        <div class="card-body">
+            <pre class="mb-0 bg-light p-3 rounded" style="max-height: 500px; overflow-y: auto;"><code>{{ dns|tojson(indent=2) }}</code></pre>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-diagram-3 display-1 text-muted"></i>
+        <h4 class="mt-3">{{ _('No DNS Information') }}</h4>
+        <p class="text-muted">{{ _('Could not retrieve DNS/CNAME information for this application.') }}</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

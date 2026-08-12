@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ account.account_name }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Accounts'), url_for('accounts.list_accounts')),
+    (account.account_name, None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-key"></i> {{ account.account_name }}
+        {% if permission != 'owner' %}
+        <span class="badge bg-secondary fs-6">{{ _('Shared') }} — {{ permission }}</span>
+        {% endif %}
+    </h2>
+    <div>
+        {% if permission == 'owner' or permission == 'admin' or permission == 'write' %}
+        {% if account.has_v2_credentials %}
+        <form method="POST" action="{{ url_for('accounts.verify_account', account_id=account.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-primary"><i class="bi bi-check-circle"></i> {{ _('Verify') }}</button>
+        </form>
+        {% else %}
+        <button class="btn btn-outline-secondary" disabled title="{{ _('Add v2 credentials to enable verification') }}">
+            <i class="bi bi-check-circle"></i> {{ _('Verify') }}
+        </button>
+        {% endif %}
+        {% endif %}
+        {% if permission == 'owner' or permission == 'admin' %}
+        <a href="{{ url_for('accounts.rotate_key', account_id=account.id) }}" class="btn btn-outline-info"><i class="bi bi-arrow-repeat"></i> {{ _('Rotate API Key') }}</a>
+        <a href="{{ url_for('accounts.edit_account', account_id=account.id) }}" class="btn btn-outline-warning"><i class="bi bi-pencil"></i> {{ _('Edit') }}</a>
+        <a href="{{ url_for('accounts.sharing', account_id=account.id) }}" class="btn btn-outline-secondary"><i class="bi bi-people"></i> {{ _('Sharing') }}</a>
+        {% endif %}
+        <a href="{{ url_for('accounts.list_accounts') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Account Details') }}</h5></div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th style="width:40%">{{ _('Account Name') }}</th><td>{{ account.account_name }}</td></tr>
+                    <tr><th>{{ _('WaaS Account ID') }}</th><td><code>{{ account.waas_account_id or _('Not verified') }}</code>{% if account.waas_account_id %} <button type="button" class="btn btn-sm btn-link p-0 ms-1" onclick="copyToClipboard('{{ account.waas_account_id }}')" title="{{ _('Copy') }}"><i class="bi bi-clipboard"></i></button>{% endif %}</td></tr>
+                    <tr><th>{{ _('Status') }}</th><td>{% if account.is_active %}<span class="badge bg-success">{{ _('Active') }}</span>{% else %}<span class="badge bg-danger">{{ _('Inactive') }}</span>{% endif %}</td></tr>
+                    <tr><th>{{ _('Owner') }}</th><td>{{ account.owner.display_name }}</td></tr>
+                    <tr><th>{{ _('Created') }}</th><td>{{ account.created_at|datetime_format }}</td></tr>
+                    <tr><th>{{ _('Last Verified') }}</th><td>{{ account.last_verified|datetime_format if account.last_verified else _('Never') }}</td></tr>
+                    <tr>
+                        <th>{{ _('API Key Expiry') }}</th>
+                        <td>
+                            {% if account.api_key_expiry %}
+                                {% set days_remaining = (account.api_key_expiry - today_date).days %}
+                                {{ account.api_key_expiry.strftime('%Y-%m-%d') }}
+                                {% if days_remaining <= 0 %}
+                                <span class="badge bg-danger">{{ _('Expired') }}</span>
+                                {% elif days_remaining <= 30 %}
+                                <span class="badge bg-warning text-dark">{{ days_remaining }} {{ _('days left') }}</span>
+                                {% else %}
+                                <span class="badge bg-success">{{ days_remaining }} {{ _('days left') }}</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">{{ _('Not set') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">{{ _('Credentials') }}</h5></div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr>
+                        <th style="width:40%">{{ _('API Key (v4)') }}</th>
+                        <td>
+                            {% if account.has_api_key %}
+                            <span class="badge bg-success"><i class="bi bi-check-circle"></i> {{ _('Configured') }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ _('Not set') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>{{ _('v2 Login (Email)') }}</th>
+                        <td>
+                            {% if account.has_v2_credentials %}
+                            <span class="badge bg-success"><i class="bi bi-check-circle"></i> {{ _('Configured') }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ _('Not set') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </table>
+                {% if not account.has_v2_credentials and (permission == 'owner' or permission == 'admin') %}
+                <div class="alert alert-warning py-2 small mb-0 mt-2">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    {{ _('v2 login credentials are required for account verification.') }}
+                    <a href="{{ url_for('accounts.edit_account', account_id=account.id) }}">{{ _('Edit account') }}</a> {{ _('to add them.') }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if shares %}
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">{{ _('Shared With') }}</h5>
+                <a href="{{ url_for('accounts.sharing', account_id=account.id) }}" class="btn btn-sm btn-outline-primary">{{ _('Manage') }}</a>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for share in shares %}
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>{{ share.user.display_name }}</strong>
+                        <small class="text-muted">({{ share.user.username }})</small>
+                    </div>
+                    {% if share.permission == 'admin' %}
+                    <span class="badge bg-danger">{{ _('Admin') }}</span>
+                    {% elif share.permission == 'write' %}
+                    <span class="badge bg-warning text-dark">{{ _('Write') }}</span>
+                    {% else %}
+                    <span class="badge bg-secondary">{{ _('Read') }}</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Quick Links') }}</h5></div>
+            <div class="list-group list-group-flush">
+                <a href="{{ url_for('applications.list_applications', account_id=account.id) }}" class="list-group-item list-group-item-action">
+                    <i class="bi bi-globe text-success"></i> {{ _('View Applications') }}
+                </a>
+                <a href="{{ url_for('certificates.list_certificates', account_id=account.id) }}" class="list-group-item list-group-item-action">
+                    <i class="bi bi-file-earmark-lock text-info"></i> {{ _('View Certificates') }}
+                </a>
+                <a href="{{ url_for('logs.index', account_id=account.id) }}" class="list-group-item list-group-item-action">
+                    <i class="bi bi-journal-text text-warning"></i> {{ _('View Logs') }}
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

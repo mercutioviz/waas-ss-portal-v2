@@ -1,0 +1,60 @@
+{% extends "email/report_base.html" %}
+{% block report_content %}
+<div class="stat-row">
+    <div class="stat">
+        <h2>{{ summary.get('total_events', 0) }}</h2>
+        <p>WAF Events</p>
+    </div>
+    <div class="stat">
+        <h2>{{ summary.get('app_count', 0) }}</h2>
+        <p>Applications</p>
+    </div>
+</div>
+
+{% if summary.get('action_breakdown') %}
+<h3>Action Breakdown</h3>
+<table>
+    <tr>
+        {% for action, count in summary.get('action_breakdown', {}).items() %}
+        <td><span class="badge {% if action == 'DENY' %}badge-danger{% elif action == 'ALLOW' %}badge-success{% else %}badge-warning{% endif %}">{{ action }}</span> {{ count }}</td>
+        {% endfor %}
+    </tr>
+</table>
+{% endif %}
+
+{% if summary.get('top_attacks') %}
+<h3>Top Attacks</h3>
+<table>
+    <thead><tr><th>Attack</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for attack, count in summary.get('top_attacks', [])[:10] %}
+    <tr><td>{{ attack }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if summary.get('top_ips') %}
+<h3>Top Source IPs</h3>
+<table>
+    <thead><tr><th>IP Address</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for ip, count in summary.get('top_ips', [])[:10] %}
+    <tr><td>{{ ip }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if summary.get('severity_breakdown') %}
+<h3>Severity Breakdown</h3>
+<table>
+    <thead><tr><th>Severity</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for severity, count in summary.get('severity_breakdown', {}).items() %}
+    <tr><td>{{ severity }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

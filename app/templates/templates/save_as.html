@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "macros/forms.html" import render_field, render_submit %}
+{% block title %}{{ _('Save as Template') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications', account_id=account.id) }}">{{ _('Applications') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}">{{ app_id }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Save as Template') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-4">
+    <h2><i class="bi bi-file-earmark-plus"></i> {{ _('Save as Template') }}</h2>
+    <p class="text-muted">
+        {{ _('Source:') }} <strong>{{ app_id }}</strong> {{ _('on account') }} <strong>{{ account.account_name }}</strong>
+    </p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" class="needs-validation" novalidate>
+            {{ form.hidden_tag() }}
+            {{ render_field(form.name) }}
+            {{ render_field(form.description) }}
+
+            {% if current_user.is_admin %}
+            {{ render_field(form.is_global) }}
+            {% endif %}
+
+            <hr>
+            <h5>{{ _('Select Sections to Include') }}</h5>
+            <p class="text-muted small">{{ _('Only selected sections will be saved in the template. Unselected sections will not be modified when the template is applied.') }}</p>
+
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header"><strong>{{ _('Security Settings') }}</strong></div>
+                        <div class="card-body">
+                            <div class="form-check mb-2">
+                                {{ form.include_basic_security() }}
+                                {{ form.include_basic_security.label(class="form-check-label") }}
+                            </div>
+                            <div class="form-check mb-2">
+                                {{ form.include_request_limits() }}
+                                {{ form.include_request_limits.label(class="form-check-label") }}
+                            </div>
+                            <div class="form-check mb-2">
+                                {{ form.include_clickjacking() }}
+                                {{ form.include_clickjacking.label(class="form-check-label") }}
+                            </div>
+                            <div class="form-check">
+                                {{ form.include_data_theft() }}
+                                {{ form.include_data_theft.label(class="form-check-label") }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header"><strong>{{ _('Infrastructure') }}</strong></div>
+                        <div class="card-body">
+                            <div class="form-check mb-2">
+                                {{ form.include_servers() }}
+                                {{ form.include_servers.label(class="form-check-label") }}
+                                <div class="form-text">{{ _('Backend server definitions') }}</div>
+                            </div>
+                            <div class="form-check">
+                                {{ form.include_endpoints() }}
+                                {{ form.include_endpoints.label(class="form-check-label") }}
+                                <div class="form-text">{{ _('Ports, domains, CNAME, TLS settings') }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Config Preview -->
+            <div class="mb-3">
+                <h6>
+                    <a class="text-decoration-none" data-bs-toggle="collapse" href="#exportPreview" role="button">
+                        <i class="bi bi-eye"></i> {{ _('Preview Exported Config') }}
+                    </a>
+                </h6>
+                <div class="collapse" id="exportPreview">
+                    <pre class="bg-light p-3 rounded" style="max-height: 400px; overflow-y: auto;"><code>{{ app_config | tojson(indent=2) }}</code></pre>
+                </div>
+            </div>
+
+            {{ render_submit(form, cancel_url=url_for('applications.view_application', account_id=account.id, app_id=app_id)) }}
+        </form>
+    </div>
+</div>
+{% endblock %}

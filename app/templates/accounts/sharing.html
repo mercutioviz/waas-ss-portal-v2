@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field %}
+{% block title %}{{ _('Sharing') }} - {{ account.account_name }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Accounts'), url_for('accounts.list_accounts')),
+    (account.account_name, url_for('accounts.view_account', account_id=account.id)),
+    (_('Sharing'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-people"></i> {{ _('Sharing') }}: {{ account.account_name }}</h2>
+    <a href="{{ url_for('accounts.view_account', account_id=account.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Collaborators') }}</h5></div>
+            <div class="card-body p-0">
+                {% if shares %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>{{ _('User') }}</th>
+                                <th>{{ _('Permission') }}</th>
+                                <th>{{ _('Granted By') }}</th>
+                                <th>{{ _('Granted At') }}</th>
+                                <th>{{ _('Actions') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for share in shares %}
+                            <tr>
+                                <td>
+                                    <strong>{{ share.user.display_name }}</strong>
+                                    {% if share.user.last_login is none or share.user.last_login < share.granted_at %}
+                                    <span class="badge bg-warning text-dark ms-1" title="{{ _('Has not logged in since access was granted') }}">{{ _('Pending') }}</span>
+                                    {% endif %}
+                                    <br><small class="text-muted">{{ share.user.username }} &lt;{{ share.user.email }}&gt;</small>
+                                </td>
+                                <td>
+                                    {% if share.permission == 'admin' %}
+                                    <span class="badge bg-danger">{{ _('Admin') }}</span>
+                                    {% elif share.permission == 'write' %}
+                                    <span class="badge bg-warning text-dark">{{ _('Write') }}</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">{{ _('Read') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ share.grantor.display_name if share.grantor else '—' }}</td>
+                                <td>{{ share.granted_at|datetime_format }}</td>
+                                <td>
+                                    <form method="POST" action="{{ url_for('accounts.revoke_share', account_id=account.id, share_id=share.id) }}" class="d-inline" data-confirm-message="{{ _('Revoke access for this user?') }}">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-x-circle"></i> {{ _('Revoke') }}
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-people display-6"></i>
+                    <p class="mt-2 mb-0">{{ _('This account is not shared with anyone.') }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Add Collaborator') }}</h5></div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('accounts.add_share', account_id=account.id) }}" data-loading="{{ _('Sharing account...') }}">
+                    {{ form.hidden_tag() }}
+                    {{ render_field(form.username) }}
+                    {{ render_field(form.permission, help='<strong>'~_('Read')~'</strong>: '~_('View applications, logs, certificates')~'<br><strong>'~_('Write')~'</strong>: '~_('Read + create/modify resources')~'<br><strong>'~_('Admin')~'</strong>: '~_('Write + manage sharing & account settings')) }}
+                    <div class="mt-4">
+                        {{ form.submit() }}
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

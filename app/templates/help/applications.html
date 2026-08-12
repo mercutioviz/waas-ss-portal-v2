@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help: Applications') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('help.index') }}">{{ _('Help') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Applications') }}</li>
+    </ol>
+</nav>
+
+<h2 class="mt-3 mb-4"><i class="bi bi-globe"></i> {{ _('Application Management') }}</h2>
+
+<div class="row g-4">
+<div class="col-lg-8">
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Viewing Applications') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Select a WaaS account from the dropdown to load its applications. The list shows each app\'s name, hostname, and backend servers.') }}</p>
+            <p>{{ _('Click on an application to see its full configuration including servers, endpoints, DNS info, and security settings.') }}</p>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Creating Applications') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Creating applications requires v2 API credentials (email + password) on the account.') }}</p>
+            <p>{{ _('You must provide:') }}</p>
+            <ul>
+                <li><strong>{{ _('Application Name') }}</strong> — {{ _('unique name for the application') }}</li>
+                <li><strong>{{ _('Hostname') }}</strong> — {{ _('the domain name users access') }}</li>
+                <li><strong>{{ _('Backend IP/Port') }}</strong> — {{ _('your origin server address') }}</li>
+                <li><strong>{{ _('Backend Type') }}</strong> — {{ _('HTTP or HTTPS for backend connection') }}</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Cloning Applications') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Clone creates a new application with the same configuration as an existing one. You can choose which sections to copy:') }}</p>
+            <ul>
+                <li>{{ _('Server configuration (backend servers, SSL, health checks)') }}</li>
+                <li>{{ _('Endpoint configuration (frontend TLS, ports)') }}</li>
+                <li>{{ _('Security configuration (protection mode, request limits, etc.)') }}</li>
+            </ul>
+            <div class="alert alert-warning mb-0">
+                <i class="bi bi-exclamation-triangle"></i> {{ _('Cloning requires v2 credentials and creates a new application via the v2 API.') }}
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Editing Server Configuration') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('On the application detail page, expand a server\'s settings to edit:') }}</p>
+            <ul>
+                <li>{{ _('Host, port, protocol (HTTP/HTTPS), weight, backup status') }}</li>
+                <li>{{ _('Backend SSL/TLS settings (TLS versions, certificate validation, SNI)') }}</li>
+                <li>{{ _('Health check settings (interval, URL, expected status)') }}</li>
+                <li>{{ _('Advanced settings (max connections, timeouts, connection pooling)') }}</li>
+            </ul>
+            <p class="mb-0">{{ _('Changes are saved via the v4 import API and take effect immediately.') }}</p>
+        </div>
+    </div>
+</div>
+</div>
+{% endblock %}

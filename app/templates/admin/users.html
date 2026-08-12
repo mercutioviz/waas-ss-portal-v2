@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Manage Users') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Admin'), url_for('admin.index')),
+    (_('Users'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-people"></i> {{ _('Users') }}</h2>
+    <a href="{{ url_for('admin.create_user') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> {{ _('Create User') }}</a>
+</div>
+
+<div class="search-filter-wrapper mb-3">
+    <div class="input-group input-group-sm" style="max-width: 320px;">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="text" class="form-control" placeholder="{{ _('Search users...') }}" data-search-target="userTableBody">
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" aria-label="Data table">
+                <thead class="table-light">
+                    <tr><th>{{ _('Username') }}</th><th>{{ _('Email') }}</th><th>{{ _('Role') }}</th><th>{{ _('Status') }}</th><th>{{ _('Last Login') }}</th><th>{{ _('Actions') }}</th></tr>
+                </thead>
+                <tbody id="userTableBody">
+                    {% for user in users %}
+                    <tr>
+                        <td><strong>{{ user.username }}</strong></td>
+                        <td>{{ user.email }}</td>
+                        <td><span class="badge bg-{{ 'danger' if user.role == 'admin' else ('info' if user.role == 'viewer' else 'primary') }}">{{ user.role }}</span></td>
+                        <td><span class="badge bg-{{ 'success' if user.is_active else 'secondary' }}">{{ _('Active') if user.is_active else _('Disabled') }}</span></td>
+                        <td><small>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else _('Never') }}</small></td>
+                        <td>
+                            <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary" aria-label="Edit"><i class="bi bi-pencil"></i></a>
+                            <form method="POST" action="{{ url_for('admin.toggle_user', user_id=user.id) }}" class="d-inline" data-confirm-message="{{ _('Are you sure?') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-{{ 'warning' if user.is_active else 'success' }}">
+                                    <i class="bi bi-{{ 'pause' if user.is_active else 'play' }}"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not users %}
+                    <tr><td colspan="6" class="text-center text-muted py-3">{{ _('No users found.') }}</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

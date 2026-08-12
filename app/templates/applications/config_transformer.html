@@ -1,0 +1,709 @@
+{% extends "base.html" %}
+{% block title %}Config Transformer — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications') }}">{{ _('Applications') }}</a></li>
+    <li class="breadcrumb-item active">{{ _('Config Transformer') }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex align-items-center mb-1">
+  <h2 class="me-3 mb-0"><i class="bi bi-sliders"></i> {{ _('Config Transformer') }}</h2>
+</div>
+<p class="text-muted mb-4">
+  Paste a WaaS application export JSON, select the sections you want, and generate a
+  clean JSON file ready for <strong>merge import</strong> to a target WaaS application.
+  No account connection required.
+</p>
+
+<!-- Step indicator -->
+<div class="d-flex align-items-center gap-2 mb-4" id="step-indicator">
+  <span class="badge rounded-pill bg-primary" id="pill-1">1 Input</span>
+  <i class="bi bi-chevron-right text-muted small"></i>
+  <span class="badge rounded-pill bg-secondary" id="pill-2">2 Select</span>
+  <i class="bi bi-chevron-right text-muted small"></i>
+  <span class="badge rounded-pill bg-secondary" id="pill-3">3 Output</span>
+</div>
+
+<!-- ===== STEP 1: Input ===== -->
+<div id="step-1">
+  <div class="card shadow-sm">
+    <div class="card-header"><i class="bi bi-clipboard-data"></i> {{ _('Paste Export JSON') }}</div>
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">{{ _('WaaS Application Export JSON') }}</label>
+        <textarea id="json-input" class="form-control font-monospace" rows="16"
+                  placeholder="{{ _('Paste the JSON exported from a WaaS application here...') }}"
+                  spellcheck="false"></textarea>
+        <div class="form-text">
+          {{ _('Obtain by selecting an application in the WaaS portal → Settings → Export Config, or via the SS Portal app view.') }}
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <button class="btn btn-primary" id="btn-parse" onclick="parseConfig()">
+          <i class="bi bi-search"></i> {{ _('Parse Config') }}
+        </button>
+        <label class="btn btn-outline-secondary mb-0" for="file-upload">
+          <i class="bi bi-upload"></i> {{ _('Upload file') }}
+        </label>
+        <input type="file" id="file-upload" accept=".json" class="d-none" onchange="loadFile(this)">
+        <span id="parse-spinner" class="spinner-border spinner-border-sm text-primary d-none" role="status"></span>
+        <span id="file-name-label" class="text-muted small d-none"></span>
+      </div>
+      <div id="parse-error" class="alert alert-danger mt-3 d-none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== STEP 2: Section selector ===== -->
+<div id="step-2" class="d-none">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h5 class="mb-0" id="source-summary"></h5>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" onclick="restart()">
+      <i class="bi bi-arrow-left"></i> {{ _('Start Over') }}
+    </button>
+  </div>
+
+  <div class="d-flex gap-2 mb-3">
+    <button class="btn btn-sm btn-outline-primary" onclick="selectAllSections(true)">
+      <i class="bi bi-check-all"></i> {{ _('Select All') }}
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="selectAllSections(false)">
+      <i class="bi bi-x-lg"></i> {{ _('Clear All') }}
+    </button>
+  </div>
+
+  <div id="section-list" class="row g-3 mb-4">
+    <!-- Rendered by JS -->
+  </div>
+
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-success" id="btn-generate" onclick="generateOutput()">
+      <i class="bi bi-file-earmark-arrow-down"></i> {{ _('Generate Output') }}
+    </button>
+    <span id="gen-spinner" class="spinner-border spinner-border-sm text-success d-none" role="status"></span>
+  </div>
+  <div id="gen-error" class="alert alert-danger mt-3 d-none"></div>
+</div>
+
+<!-- ===== STEP 3: Output ===== -->
+<div id="step-3" class="d-none">
+  <div class="alert alert-info d-flex gap-2 align-items-start mb-3">
+    <i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>
+    <div>
+      <strong>{{ _('Merge Import') }}</strong> —
+      {{ _('This output is formatted for the WaaS') }} <em>merge</em>
+      {{ _('import method. It overlays the selected sections onto the target application without replacing its entire configuration.') }}
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span><i class="bi bi-braces"></i> {{ _('Transformed Config') }} <span id="output-summary" class="badge bg-secondary ms-2"></span></span>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" onclick="copyOutput()" id="btn-copy">
+          <i class="bi bi-clipboard"></i> {{ _('Copy') }}
+        </button>
+        <button class="btn btn-sm btn-outline-primary" onclick="downloadOutput()">
+          <i class="bi bi-download"></i> {{ _('Download .json') }}
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="goBackToSelect()">
+          <i class="bi bi-pencil"></i> {{ _('Edit Selection') }}
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="restart()">
+          <i class="bi bi-arrow-left"></i> {{ _('Start Over') }}
+        </button>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <textarea id="output-json" class="form-control font-monospace border-0 rounded-0 rounded-bottom"
+                rows="24" readonly spellcheck="false"></textarea>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION CARD TEMPLATE (cloned by JS) ===== -->
+<template id="tmpl-section-simple">
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100 section-card">
+      <div class="card-body">
+        <div class="form-check d-flex align-items-start gap-2">
+          <input class="form-check-input mt-1 section-toggle" type="checkbox" checked>
+          <div>
+            <label class="form-check-label fw-semibold section-label"></label>
+            <div class="text-muted small section-desc mt-1"></div>
+            <div class="text-muted fst-italic small section-strip mt-1 d-none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<template id="tmpl-section-list">
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100 section-card">
+      <div class="card-body">
+        <div class="form-check d-flex align-items-start gap-2">
+          <input class="form-check-input mt-1 section-toggle" type="checkbox" checked>
+          <div class="w-100">
+            <label class="form-check-label fw-semibold section-label"></label>
+            <span class="badge bg-secondary ms-1 section-count"></span>
+            <div class="text-muted small section-desc mt-1 mb-2"></div>
+            <div class="text-muted fst-italic small section-strip mb-2 d-none"></div>
+            <div class="section-items-container">
+              <div class="d-flex gap-1 mb-1">
+                <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none select-all-items" style="font-size:.8rem">{{ _('all') }}</button>
+                <span class="text-muted small">/</span>
+                <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none select-none-items text-secondary" style="font-size:.8rem">{{ _('none') }}</button>
+              </div>
+              <div class="section-items" style="max-height:140px;overflow-y:auto;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<template id="tmpl-section-endpoints">
+  <div class="col-12">
+    <div class="card section-card">
+      <div class="card-body">
+        <div class="form-check d-flex align-items-start gap-2">
+          <input class="form-check-input mt-1 section-toggle" type="checkbox" checked>
+          <div class="w-100">
+            <label class="form-check-label fw-semibold section-label"></label>
+            <div class="text-muted small section-desc mt-1 mb-2"></div>
+            <div class="alert alert-warning py-1 px-2 small section-strip mb-2 d-none">
+              <i class="bi bi-shield-exclamation"></i> <span class="section-strip-text"></span>
+            </div>
+            <div class="row g-2 section-sub-list">
+              <!-- sub-section checkboxes inserted here -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Section definitions and strip constants injected from Python — single source of truth.
+const SECTION_DEFINITIONS = {{ section_definitions | tojson }};
+const STRIP_CONSTANTS = {{ strip_constants | tojson }};
+
+// State
+let _rawJson = '';
+let _parsed  = null;
+let _sections = [];
+
+// ---------------------------------------------------------------------------
+// Step navigation
+// ---------------------------------------------------------------------------
+function showStep(n) {
+  document.getElementById('step-1').classList.toggle('d-none', n !== 1);
+  document.getElementById('step-2').classList.toggle('d-none', n !== 2);
+  document.getElementById('step-3').classList.toggle('d-none', n !== 3);
+  ['pill-1','pill-2','pill-3'].forEach((id, i) => {
+    const el = document.getElementById(id);
+    el.className = 'badge rounded-pill ' + (i + 1 === n ? 'bg-primary' : 'bg-secondary');
+  });
+}
+
+function restart() {
+  showStep(1);
+  document.getElementById('json-input').value = '';
+  document.getElementById('section-list').innerHTML = '';
+  document.getElementById('output-json').value = '';
+  document.getElementById('parse-error').classList.add('d-none');
+  document.getElementById('gen-error').classList.add('d-none');
+  const lbl = document.getElementById('file-name-label');
+  if (lbl) lbl.classList.add('d-none');
+  _rawJson = '';
+  _parsed  = null;
+  _sections = [];
+}
+
+function goBackToSelect() {
+  showStep(2);
+}
+
+// ---------------------------------------------------------------------------
+// Step 1 → Step 2: parse (client-side — no server round-trip)
+// ---------------------------------------------------------------------------
+function loadFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const content = e.target.result.replace(/^﻿/, '');  // strip BOM
+    document.getElementById('json-input').value = content;
+    const lbl = document.getElementById('file-name-label');
+    lbl.textContent = `${file.name} (${(content.length / 1024).toFixed(1)} KB loaded)`;
+    lbl.classList.remove('d-none');
+    document.getElementById('parse-error').classList.add('d-none');
+  };
+  reader.readAsText(file);
+}
+
+function parseConfig() {
+  let raw = document.getElementById('json-input').value.replace(/^﻿/, '').trim();
+  if (!raw) { showParseError('Please paste or upload a WaaS export JSON first.'); return; }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch(syntaxErr) {
+    showParseError('JSON syntax error: ' + syntaxErr.message +
+      '\n\nIf you copied from a browser or terminal, try downloading the file and using Upload instead.');
+    return;
+  }
+  if (Array.isArray(parsed)) {
+    showParseError('This JSON is an array "[…]", but a WaaS config export is an object "{…}". Make sure you exported the full application config.');
+    return;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    showParseError('This does not look like a WaaS config (expected a JSON object).');
+    return;
+  }
+
+  document.getElementById('parse-error').classList.add('d-none');
+  const sections = buildSectionMetadata(parsed);
+  _rawJson  = raw;
+  _parsed   = parsed;
+  _sections = sections;
+  renderSections(sections);
+  document.getElementById('source-summary').textContent =
+    `${sections.length} section${sections.length !== 1 ? 's' : ''} detected`;
+  showStep(2);
+}
+
+// Mirrors Python get_section_metadata() — keeps logic in sync via injected SECTION_DEFINITIONS.
+function buildSectionMetadata(parsed) {
+  const result = [];
+  for (const defn of SECTION_DEFINITIONS) {
+    const key = defn.key;
+    if (!(key in parsed)) continue;
+    const sectionData = parsed[key];
+    const meta = {
+      key,
+      label: defn.label,
+      type: defn.type,
+      description: defn.description,
+      always_strip_note: defn.always_strip_note || null,
+    };
+
+    if (defn.type === 'endpoints') {
+      meta.sub_sections = (defn.sub_sections || []).map(sub => {
+        let present = sub.key in sectionData;
+        if (sub.key === 'sni_certificates') {
+          present = !!(sectionData.sni_certificates && sectionData.sni_certificates.length);
+        }
+        return { key: sub.key, label: sub.label, caution: !!sub.caution,
+                 note: sub.note || null, warning: sub.warning || null, present };
+      });
+
+    } else if (defn.type === 'named_list') {
+      const items = Array.isArray(sectionData) ? sectionData : [];
+      meta.count = items.length;
+      meta.items = items.map((item, i) => ({
+        id:    String(item[defn.id_field] !== undefined ? item[defn.id_field] : i),
+        label: String(item[defn.id_field] !== undefined ? item[defn.id_field] : `Item ${i}`),
+      }));
+
+    } else if (defn.type === 'ip_list') {
+      const items = Array.isArray(sectionData) ? sectionData : [];
+      const labelFields = defn.label_fields || [defn.id_field];
+      meta.count = items.length;
+      meta.items = items.map((item, i) => ({
+        id:    String(item[defn.id_field] !== undefined ? item[defn.id_field] : i),
+        label: joinLabel(item, labelFields),
+      }));
+
+    } else if (defn.type === 'subsection') {
+      const inner = (typeof sectionData === 'object' && sectionData !== null && !Array.isArray(sectionData))
+        ? (sectionData[defn.list_field] || []) : [];
+      const labelFields = defn.label_fields || [defn.id_field];
+      meta.count = inner.length;
+      meta.list_field = defn.list_field;
+      meta.items = inner.map((item, i) => ({
+        id:    String(item[defn.id_field] !== undefined ? item[defn.id_field] : i),
+        label: joinLabel(item, labelFields),
+      }));
+
+    } else if (defn.type === 'simple') {
+      meta.count = null;
+    }
+
+    result.push(meta);
+  }
+  return result;
+}
+
+function joinLabel(item, fields) {
+  const parts = (fields || []).map(f => item[f]).filter(v => v !== undefined && v !== null && v !== '');
+  return parts.slice(0, 2).join(' — ') || '(unnamed)';
+}
+
+// ---------------------------------------------------------------------------
+// Step 2 → Step 3: transform (client-side — no server round-trip)
+// ---------------------------------------------------------------------------
+function generateOutput() {
+  const selections = collectSelections();
+  const selected = Object.values(selections).filter(s => s.include).length;
+  if (selected === 0) {
+    showGenError('Select at least one section before generating.');
+    return;
+  }
+  document.getElementById('gen-error').classList.add('d-none');
+  try {
+    const result = doTransform(_parsed, selections);
+    const sectionCount = Object.keys(result).length;
+    document.getElementById('output-json').value = JSON.stringify(result, null, 2);
+    document.getElementById('output-summary').textContent =
+      `${sectionCount} section${sectionCount !== 1 ? 's' : ''}`;
+    showStep(3);
+  } catch(e) {
+    showGenError('Transform error: ' + e.message);
+  }
+}
+
+// Mirrors Python transform_config() — uses injected SECTION_DEFINITIONS and STRIP_CONSTANTS.
+function doTransform(parsed, selections) {
+  const result = {};
+  for (const defn of SECTION_DEFINITIONS) {
+    const key = defn.key;
+    if (!(key in parsed)) continue;
+    const sel = selections[key] || {};
+    if (!sel.include) continue;
+    const sectionData = parsed[key];
+
+    if (defn.type === 'simple') {
+      result[key] = sectionData;
+
+    } else if (defn.type === 'named_list') {
+      let items = Array.isArray(sectionData) ? sectionData : [];
+      items = filterItems(items, defn.id_field, sel.items !== undefined ? sel.items : null);
+      const strip = new Set(STRIP_CONSTANTS.server_runtime);
+      result[key] = items.map(item => {
+        const copy = {};
+        for (const [k, v] of Object.entries(item)) { if (!strip.has(k)) copy[k] = v; }
+        return copy;
+      });
+
+    } else if (defn.type === 'ip_list') {
+      const items = Array.isArray(sectionData) ? sectionData : [];
+      result[key] = filterItems(items, defn.id_field, sel.items !== undefined ? sel.items : null);
+
+    } else if (defn.type === 'subsection') {
+      if (typeof sectionData !== 'object' || sectionData === null || Array.isArray(sectionData)) {
+        result[key] = sectionData;
+      } else {
+        const copy = Object.assign({}, sectionData);
+        const selectedItems = sel.items !== undefined ? sel.items : null;
+        if (defn.list_field in copy && selectedItems !== null) {
+          copy[defn.list_field] = filterItems(copy[defn.list_field] || [], defn.id_field, selectedItems);
+        }
+        result[key] = copy;
+      }
+
+    } else if (defn.type === 'endpoints') {
+      const ep = transformEndpoints(sectionData, sel.sub || {});
+      if (Object.keys(ep).length > 0) result[key] = ep;
+    }
+  }
+  return result;
+}
+
+function filterItems(items, idField, selectedIds) {
+  if (selectedIds === null || selectedIds === undefined) return items;
+  const selectedSet = new Set(selectedIds.map(String));
+  return items.filter(item => item[idField] !== undefined && selectedSet.has(String(item[idField])));
+}
+
+function transformEndpoints(ep, sub) {
+  const result = {};
+  if (sub.https        && 'https'        in ep) result.https        = ep.https;
+  if (sub.advanced     && 'advanced'     in ep) result.advanced     = ep.advanced;
+  if (sub.deployment   && 'deployment'   in ep) result.deployment   = ep.deployment;
+  if (sub.domains      && 'domains'      in ep) result.domains      = ep.domains;
+  if (sub.sni_certificates && ep.sni_certificates && ep.sni_certificates.length) result.sni_certificates = ep.sni_certificates;
+
+  if (sub.ports && 'ports' in ep) {
+    const strip = new Set(STRIP_CONSTANTS.endpoint_port);
+    result.ports = (ep.ports || []).map(port => {
+      const copy = {};
+      for (const [k, v] of Object.entries(port)) { if (!strip.has(k)) copy[k] = v; }
+      return copy;
+    });
+  }
+  if (sub.certificate && 'certificate' in ep) {
+    const strip = new Set(STRIP_CONSTANTS.endpoint_cert);
+    const cert = {};
+    for (const [k, v] of Object.entries(ep.certificate)) { if (!strip.has(k)) cert[k] = v; }
+    result.certificate = cert;
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Section selector rendering
+// ---------------------------------------------------------------------------
+function renderSections(sections) {
+  const container = document.getElementById('section-list');
+  container.innerHTML = '';
+
+  sections.forEach(sec => {
+    let card;
+    if (sec.type === 'endpoints') {
+      card = renderEndpointsCard(sec);
+    } else if (sec.type === 'simple') {
+      card = renderSimpleCard(sec);
+    } else {
+      // named_list, ip_list, subsection
+      card = renderListCard(sec);
+    }
+    container.appendChild(card);
+  });
+}
+
+function renderSimpleCard(sec) {
+  const tmpl = document.getElementById('tmpl-section-simple');
+  const clone = tmpl.content.cloneNode(true);
+  const root = clone.querySelector('.col-md-6');
+  root.dataset.key = sec.key;
+
+  const toggle = clone.querySelector('.section-toggle');
+  toggle.id = `sec_${sec.key}`;
+  clone.querySelector('.section-label').htmlFor = toggle.id;
+  clone.querySelector('.section-label').textContent = sec.label;
+  clone.querySelector('.section-desc').textContent = sec.description;
+
+  if (sec.always_strip_note) {
+    const strip = clone.querySelector('.section-strip');
+    strip.classList.remove('d-none');
+    strip.textContent = '⚠ Always stripped: ' + sec.always_strip_note;
+  }
+  return clone;
+}
+
+function renderListCard(sec) {
+  const tmpl = document.getElementById('tmpl-section-list');
+  const clone = tmpl.content.cloneNode(true);
+  const root = clone.querySelector('.col-md-6');
+  root.dataset.key = sec.key;
+
+  const toggle = clone.querySelector('.section-toggle');
+  toggle.id = `sec_${sec.key}`;
+  clone.querySelector('.section-label').htmlFor = toggle.id;
+  clone.querySelector('.section-label').textContent = sec.label;
+  clone.querySelector('.section-count').textContent = sec.count;
+  clone.querySelector('.section-desc').textContent = sec.description;
+
+  if (sec.always_strip_note) {
+    const strip = clone.querySelector('.section-strip');
+    strip.classList.remove('d-none');
+    strip.textContent = '⚠ ' + sec.always_strip_note;
+  }
+
+  // Per-item checkboxes
+  const itemsDiv = clone.querySelector('.section-items');
+  (sec.items || []).forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'form-check form-check-sm';
+    const id = `item_${sec.key}_${CSS.escape(item.id)}`;
+    div.innerHTML = `<input class="form-check-input item-check" type="checkbox" checked
+                       id="${id}" data-section="${sec.key}" data-item="${escHtml(item.id)}">
+                     <label class="form-check-label small" for="${id}">${escHtml(item.label)}</label>`;
+    itemsDiv.appendChild(div);
+  });
+
+  // Select all / none buttons for items
+  const selectAll = clone.querySelector('.select-all-items');
+  const selectNone = clone.querySelector('.select-none-items');
+  selectAll.addEventListener('click', () => {
+    itemsDiv.querySelectorAll('.item-check').forEach(cb => cb.checked = true);
+  });
+  selectNone.addEventListener('click', () => {
+    itemsDiv.querySelectorAll('.item-check').forEach(cb => cb.checked = false);
+  });
+
+  // Show/hide item list based on section toggle
+  toggle.addEventListener('change', () => {
+    clone.querySelector('.section-items-container').style.opacity = toggle.checked ? '1' : '0.4';
+  });
+
+  return clone;
+}
+
+function renderEndpointsCard(sec) {
+  const tmpl = document.getElementById('tmpl-section-endpoints');
+  const clone = tmpl.content.cloneNode(true);
+  const root = clone.querySelector('.col-12');
+  root.dataset.key = sec.key;
+
+  const toggle = clone.querySelector('.section-toggle');
+  toggle.id = 'sec_endpoints';
+  clone.querySelector('.section-label').htmlFor = toggle.id;
+  clone.querySelector('.section-label').textContent = sec.label;
+  clone.querySelector('.section-desc').textContent = sec.description;
+
+  if (sec.always_strip_note) {
+    const strip = clone.querySelector('.section-strip');
+    strip.classList.remove('d-none');
+    strip.querySelector('.section-strip-text').textContent = sec.always_strip_note;
+  }
+
+  const subList = clone.querySelector('.section-sub-list');
+  (sec.sub_sections || []).forEach(sub => {
+    if (!sub.present && sub.key !== 'https' && sub.key !== 'advanced' && sub.key !== 'ports' && sub.key !== 'certificate') return;
+
+    const col = document.createElement('div');
+    col.className = 'col-sm-6 col-lg-4';
+
+    let badge = '';
+    if (sub.caution) {
+      badge = '<span class="badge bg-warning text-dark ms-1" title="' + escHtml(sub.warning || '') + '">Caution</span>';
+    }
+
+    let noteHtml = '';
+    if (sub.warning) {
+      noteHtml = `<div class="text-warning small mt-1"><i class="bi bi-exclamation-triangle"></i> ${escHtml(sub.warning)}</div>`;
+    } else if (sub.note) {
+      noteHtml = `<div class="text-muted small mt-1">${escHtml(sub.note)}</div>`;
+    }
+
+    const cbId = `ep_sub_${sub.key}`;
+    col.innerHTML = `
+      <div class="form-check">
+        <input class="form-check-input ep-sub-check" type="checkbox"
+               id="${cbId}" data-sub="${sub.key}" ${sub.caution ? '' : 'checked'}>
+        <label class="form-check-label fw-semibold small" for="${cbId}">
+          ${escHtml(sub.label)}${badge}
+        </label>
+        ${noteHtml}
+      </div>`;
+    subList.appendChild(col);
+  });
+
+  toggle.addEventListener('change', () => {
+    subList.style.opacity = toggle.checked ? '1' : '0.4';
+  });
+
+  return clone;
+}
+
+// ---------------------------------------------------------------------------
+// Selection collection
+// ---------------------------------------------------------------------------
+function collectSelections() {
+  const selections = {};
+  const container = document.getElementById('section-list');
+
+  container.querySelectorAll('[data-key]').forEach(card => {
+    const key = card.dataset.key;
+    const toggle = card.querySelector('.section-toggle');
+    const include = toggle ? toggle.checked : false;
+
+    if (key === 'endpoints') {
+      const sub = {};
+      card.querySelectorAll('.ep-sub-check').forEach(cb => {
+        sub[cb.dataset.sub] = cb.checked;
+      });
+      selections[key] = { include, sub };
+    } else {
+      const itemChecks = card.querySelectorAll('.item-check');
+      if (itemChecks.length > 0) {
+        const selectedItems = [];
+        let allSelected = true;
+        itemChecks.forEach(cb => {
+          if (cb.checked) selectedItems.push(cb.dataset.item);
+          else allSelected = false;
+        });
+        // null = "all items"; list = specific items
+        selections[key] = { include, items: allSelected ? null : selectedItems };
+      } else {
+        selections[key] = { include };
+      }
+    }
+  });
+
+  return selections;
+}
+
+function selectAllSections(checked) {
+  document.querySelectorAll('.section-toggle').forEach(cb => {
+    cb.checked = checked;
+    cb.dispatchEvent(new Event('change'));
+  });
+  document.querySelectorAll('.item-check, .ep-sub-check').forEach(cb => cb.checked = checked);
+}
+
+// ---------------------------------------------------------------------------
+// Output actions
+// ---------------------------------------------------------------------------
+function copyOutput() {
+  const ta = document.getElementById('output-json');
+  ta.select();
+  document.execCommand('copy');
+  const btn = document.getElementById('btn-copy');
+  btn.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
+  setTimeout(() => { btn.innerHTML = '<i class="bi bi-clipboard"></i> Copy'; }, 2000);
+}
+
+function downloadOutput() {
+  const content = document.getElementById('output-json').value;
+  const blob = new Blob([content], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'waas-config-import.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+function showParseError(msg, detail) {
+  const el = document.getElementById('parse-error');
+  el.innerHTML = '';
+  const msgEl = document.createElement('div');
+  msgEl.style.whiteSpace = 'pre-wrap';
+  msgEl.textContent = msg;
+  el.appendChild(msgEl);
+  if (detail && detail.excerpt) {
+    const pre = document.createElement('pre');
+    pre.className = 'mt-2 mb-0 p-2 bg-white bg-opacity-50 rounded border small';
+    pre.style.cssText = 'font-size:.75rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all';
+    pre.textContent = detail.excerpt;
+    el.appendChild(pre);
+    const hint = document.createElement('div');
+    hint.className = 'mt-1 small';
+    hint.textContent = `(▶ marks line ${detail.line}, column ${detail.col})`;
+    el.appendChild(hint);
+  }
+  el.classList.remove('d-none');
+}
+
+function showGenError(msg) {
+  const el = document.getElementById('gen-error');
+  el.textContent = msg;
+  el.classList.remove('d-none');
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>
+{% endblock extra_js %}

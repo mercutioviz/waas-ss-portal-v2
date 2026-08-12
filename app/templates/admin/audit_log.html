@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Audit Log') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Admin'), url_for('admin.index')),
+    (_('Audit Log'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-journal-text"></i> {{ _('Audit Log') }}</h2>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">{{ _('Filter by User') }}</label>
+                <select name="user_id" class="form-select">
+                    <option value="">{{ _('All Users') }}</option>
+                    {% for user in users %}
+                    <option value="{{ user.id }}" {{ 'selected' if user_filter == user.id }}>{{ user.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">{{ _('Filter by Action') }}</label>
+                <select name="action" class="form-select">
+                    <option value="">{{ _('All Actions') }}</option>
+                    {% for action in actions %}
+                    <option value="{{ action }}" {{ 'selected' if action_filter == action }}>{{ action }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">{{ _('From Date') }}</label>
+                <input type="date" name="date_from" class="form-control" value="{{ date_from or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">{{ _('To Date') }}</label>
+                <input type="date" name="date_to" class="form-control" value="{{ date_to or '' }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-funnel"></i> {{ _('Filter') }}</button>
+                <a href="{{ url_for('admin.audit_log') }}" class="btn btn-outline-secondary">{{ _('Clear') }}</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr><th>{{ _('Timestamp') }}</th><th>{{ _('User') }}</th><th>{{ _('Action') }}</th><th>{{ _('Resource') }}</th><th>{{ _('Details') }}</th><th>{{ _('IP') }}</th></tr>
+                </thead>
+                <tbody>
+                    {% for log in logs.items %}
+                    <tr>
+                        <td><small>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') if log.timestamp else 'N/A' }}</small></td>
+                        <td>{{ log.user.username if log.user else 'N/A' }}</td>
+                        <td><span class="badge bg-secondary">{{ log.action }}</span></td>
+                        <td><small>{{ log.resource_type or '—' }}{% if log.resource_id %} #{{ log.resource_id }}{% endif %}</small></td>
+                        <td><small>{{ log.details or '—' }}</small></td>
+                        <td><small>{{ log.ip_address or '—' }}</small></td>
+                    </tr>
+                    {% endfor %}
+                    {% if not logs.items %}
+                    <tr><td colspan="6" class="text-center text-muted py-3">{{ _('No audit log entries found.') }}</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% if logs.pages > 1 %}
+    <div class="card-footer">
+        <nav>
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                {% if logs.has_prev %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('admin.audit_log', page=logs.prev_num, user_id=user_filter or '', action=action_filter or '') }}">{{ _('Previous') }}</a></li>
+                {% endif %}
+                {% for page_num in logs.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if page_num %}
+                    <li class="page-item {{ 'active' if page_num == logs.page }}"><a class="page-link" href="{{ url_for('admin.audit_log', page=page_num, user_id=user_filter or '', action=action_filter or '') }}">{{ page_num }}</a></li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                {% if logs.has_next %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('admin.audit_log', page=logs.next_num, user_id=user_filter or '', action=action_filter or '') }}">{{ _('Next') }}</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field, render_submit %}
+{% block title %}{{ _('Edit User') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Admin'), url_for('admin.index')),
+    (_('Users'), url_for('admin.list_users')),
+    (edit_user.username, None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-4">
+    <h2><i class="bi bi-pencil"></i> {{ _('Edit User') }}: {{ edit_user.username }}</h2>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-body">
+        <form method="POST" class="needs-validation" novalidate>
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                <label class="form-label">{{ _('Username') }}</label>
+                <input type="text" class="form-control" value="{{ edit_user.username }}" disabled>
+            </div>
+            {{ render_field(form.email) }}
+            {{ render_field(form.display_name) }}
+            {{ render_field(form.role) }}
+            {{ render_field(form.is_active) }}
+            {{ render_field(form.new_password) }}
+            {{ render_submit(form, cancel_url=url_for('admin.list_users')) }}
+        </form>
+    </div>
+</div>
+{% endblock %}

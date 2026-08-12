@@ -1,0 +1,80 @@
+{# Pagination macro for log pages and other paginated views.
+   Import via: {% from "macros/pagination.html" import render_pagination %}
+
+   Parameters:
+     endpoint   — the Flask endpoint name (e.g. 'logs.waf_logs')
+     page       — current page number (1-based)
+     total_pages — total number of pages
+     total      — total number of records
+     per_page   — items per page
+     params     — dict of extra query params to preserve (account_id, app_name, filters, etc.)
+#}
+{% macro render_pagination(endpoint, page, total_pages, total, per_page, params={}) %}
+{% if total_pages > 1 %}
+<nav aria-label="Page navigation" class="mt-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <small class="text-muted">
+      {{ _('Page %(page)s of %(total_pages)s', page=page, total_pages=total_pages) }}
+      <span class="ms-1">({{ _('≈%(total)s events', total=total) }})</span>
+    </small>
+
+    <div class="d-flex align-items-center gap-2">
+      <ul class="pagination pagination-sm mb-0">
+        {# First #}
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for(endpoint, page=1, **params) }}" title="{{ _('First') }}"><i class="bi bi-chevron-double-left"></i></a>
+        </li>
+        {# Prev #}
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for(endpoint, page=page-1, **params) }}"><i class="bi bi-chevron-left"></i></a>
+        </li>
+
+        {# Page numbers with ellipsis #}
+        {% set window = 2 %}
+        {% set start = [page - window, 1] | max %}
+        {% set end = [page + window, total_pages] | min %}
+
+        {% if start > 1 %}
+        <li class="page-item"><a class="page-link" href="{{ url_for(endpoint, page=1, **params) }}">1</a></li>
+        {% if start > 2 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+        {% endif %}
+
+        {% for p in range(start, end + 1) %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+          <a class="page-link" href="{{ url_for(endpoint, page=p, **params) }}">{{ p }}</a>
+        </li>
+        {% endfor %}
+
+        {% if end < total_pages %}
+        {% if end < total_pages - 1 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+        <li class="page-item"><a class="page-link" href="{{ url_for(endpoint, page=total_pages, **params) }}">{{ total_pages }}</a></li>
+        {% endif %}
+
+        {# Next #}
+        <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for(endpoint, page=page+1, **params) }}"><i class="bi bi-chevron-right"></i></a>
+        </li>
+        {# Last #}
+        <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for(endpoint, page=total_pages, **params) }}" title="{{ _('Last') }}"><i class="bi bi-chevron-double-right"></i></a>
+        </li>
+      </ul>
+
+      {# Jump to page #}
+      <form class="d-flex align-items-center gap-1 ms-2" method="GET" action="{{ url_for(endpoint, **params) }}">
+        {% for k, v in params.items() %}
+        <input type="hidden" name="{{ k }}" value="{{ v }}">
+        {% endfor %}
+        <input type="number" name="page" min="1" max="{{ total_pages }}" value="{{ page }}"
+               class="form-control form-control-sm" style="width: 70px" aria-label="{{ _('Jump to page') }}">
+        <button type="submit" class="btn btn-sm btn-outline-secondary">{{ _('Go') }}</button>
+      </form>
+    </div>
+  </div>
+</nav>
+{% elif total > 0 %}
+<div class="text-center mt-3">
+  <small class="text-muted">{{ _('Showing all %(total)s events', total=total) }}</small>
+</div>
+{% endif %}
+{% endmacro %}

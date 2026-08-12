@@ -1,0 +1,227 @@
+{
+  "SECTION_DEFINITIONS": [
+    {
+      "key": "endpoints",
+      "label": "Endpoints",
+      "type": "endpoints",
+      "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+      "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+      "sub_sections": [
+        {
+          "key": "https",
+          "label": "TLS Version Settings",
+          "caution": false,
+          "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import."
+        },
+        {
+          "key": "advanced",
+          "label": "Advanced WAF / Session Settings",
+          "caution": false,
+          "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles."
+        },
+        {
+          "key": "ports",
+          "label": "Port Definitions",
+          "caution": false,
+          "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped."
+        },
+        {
+          "key": "certificate",
+          "label": "Certificate Management Flags",
+          "caution": true,
+          "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped."
+        },
+        {
+          "key": "deployment",
+          "label": "Region / Deployment Settings",
+          "caution": true,
+          "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target."
+        },
+        {
+          "key": "domains",
+          "label": "Domain List",
+          "caution": true,
+          "warning": "Source app domains \u2014 almost certainly wrong for a different target app."
+        },
+        {
+          "key": "sni_certificates",
+          "label": "SNI Certificates",
+          "caution": true,
+          "warning": "May contain certificate material encrypted for the source account."
+        }
+      ]
+    },
+    {
+      "key": "servers",
+      "label": "Servers",
+      "type": "named_list",
+      "id_field": "name",
+      "description": "Backend server host/port, SSL to backend, health check config, and connection pool settings.",
+      "always_strip_note": "Runtime fields (health, mode, backend_test_result, last_test_time) always stripped."
+    },
+    {
+      "key": "allowed_ips",
+      "label": "Allowed IPs",
+      "type": "ip_list",
+      "id_field": "ip",
+      "label_fields": [
+        "ip",
+        "note"
+      ],
+      "description": "Client IP/CIDR entries that bypass WAF inspection."
+    },
+    {
+      "key": "blocked_bots",
+      "label": "Bot Blocking",
+      "type": "simple",
+      "description": "Bot category blocking toggles (search engines, scrapers, scanners, GenAI, etc.)."
+    },
+    {
+      "key": "client_evaluation",
+      "label": "Client Evaluation (CAPTCHA)",
+      "type": "subsection",
+      "list_field": "rules",
+      "id_field": "name",
+      "description": "CAPTCHA type, client risk scoring rules, and mouse-event detection."
+    },
+    {
+      "key": "header_allow_deny",
+      "label": "Header Allow/Deny Rules",
+      "type": "subsection",
+      "list_field": "rules",
+      "id_field": "name",
+      "description": "Per-header injection detection, metacharacter blocking, and exception patterns."
+    },
+    {
+      "key": "ip_reputation",
+      "label": "IP Reputation",
+      "type": "subsection",
+      "list_field": "exceptions",
+      "id_field": "ip",
+      "label_fields": [
+        "ip",
+        "comment"
+      ],
+      "description": "GeoIP blocking, threat-intelligence categories, and per-IP allow exceptions."
+    },
+    {
+      "key": "parameter_protection",
+      "label": "Parameter Protection",
+      "type": "simple",
+      "description": "Request parameter validation, file upload limits, and injection detection for parameters."
+    },
+    {
+      "key": "referer_spam",
+      "label": "Referer Spam",
+      "type": "simple",
+      "description": "Referer spam detection toggle and exception patterns."
+    },
+    {
+      "key": "request_limits",
+      "label": "Request Limits",
+      "type": "simple",
+      "description": "Maximum lengths for URL, query string, headers, cookies, and total request body."
+    },
+    {
+      "key": "response_cloaking",
+      "label": "Response Cloaking",
+      "type": "simple",
+      "description": "Status code normalisation and sensitive response header suppression."
+    },
+    {
+      "key": "response_page_component",
+      "label": "Response Pages",
+      "type": "subsection",
+      "list_field": "pages",
+      "id_field": "name",
+      "label_fields": [
+        "name",
+        "type"
+      ],
+      "description": "Custom HTML pages for blocked requests, CAPTCHA, login flows, and error responses."
+    },
+    {
+      "key": "slow_client_prevention",
+      "label": "Slow Client Prevention",
+      "type": "simple",
+      "description": "Timeouts and minimum data-rate thresholds for slow HTTP attack mitigation."
+    },
+    {
+      "key": "tarpit_profile",
+      "label": "Tarpit Profile",
+      "type": "simple",
+      "description": "Request backlog limit and delay interval for tarpitting abusive clients."
+    },
+    {
+      "key": "trusted_hosts",
+      "label": "Trusted Hosts",
+      "type": "subsection",
+      "list_field": "trusted_hosts",
+      "id_field": "hostname",
+      "label_fields": [
+        "hostname",
+        "note"
+      ],
+      "description": "Named IP entries that bypass WAF inspection (internal load balancers, monitoring, etc.)."
+    },
+    {
+      "key": "url_access_and_redirects",
+      "label": "URL Access & Redirect Rules",
+      "type": "subsection",
+      "list_field": "url_adrs",
+      "id_field": "name",
+      "description": "URL-level allow, deny, and redirect rules with extended match conditions."
+    },
+    {
+      "key": "url_protection",
+      "label": "URL Protection",
+      "type": "simple",
+      "description": "Allowed HTTP methods, content types, CSRF protection, and URL-level injection detection."
+    },
+    {
+      "key": "violation_responses",
+      "label": "Violation Responses",
+      "type": "subsection",
+      "list_field": "policies",
+      "id_field": "name",
+      "description": "Actions (block, tarpit, redirect) triggered when WAF violation risk scores exceed thresholds."
+    },
+    {
+      "key": "web_scraping_policy",
+      "label": "Web Scraping Policy",
+      "type": "subsection",
+      "list_field": "web_scraping_policies",
+      "id_field": "name",
+      "description": "Bot scraping detection, hidden link injection, and JavaScript challenge settings."
+    },
+    {
+      "key": "website_profile",
+      "label": "Website Profile (Content Profiles)",
+      "type": "subsection",
+      "list_field": "app_profiles",
+      "id_field": "name",
+      "description": "URL-matched content type profiles for JSON, XML, and custom input validation policies."
+    }
+  ],
+  "STRIP_CONSTANTS": {
+    "server_runtime": [
+      "backend_test_result",
+      "health",
+      "last_test_time",
+      "mode",
+      "testing_backend_connectivity",
+      "viewed_backend_result"
+    ],
+    "endpoint_cert": [
+      "aes_key_customer_container",
+      "aes_key_encrypted",
+      "encrypted_ssl_private_key",
+      "ssl_certificate",
+      "ssl_private_key_customer_container"
+    ],
+    "endpoint_port": [
+      "ca_name",
+      "waf_container_exposed_port"
+    ]
+  }
+}

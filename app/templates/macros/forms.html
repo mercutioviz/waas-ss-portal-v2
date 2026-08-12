@@ -1,0 +1,60 @@
+{# Form-level layout macros: field rendering, submit footer, checkbox groups.
+   Import in a template via:
+       {% from "macros/forms.html" import render_field, render_submit, render_checkbox_group %}
+#}
+
+{# Render a single WTForms field with label, help text, and error messages.
+   Handles text/password/select/file/textarea via the standard wrapper,
+   and BooleanField via the form-check wrapper.
+   Extra keyword arguments are forwarded to the field call via kwargs. #}
+{% macro render_field(field, help=None, autofocus=false) %}
+{% if field.type == 'BooleanField' %}
+<div class="mb-3 form-check">
+  {{ field(**kwargs) }}
+  {{ field.label(class="form-check-label") }}
+  {% if help %}<div class="form-text">{{ help|safe }}</div>{% endif %}
+  {% for e in field.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+</div>
+{% else %}
+<div class="mb-3">
+  {{ field.label(class="form-label") }}
+  {{ field(autofocus=autofocus, **kwargs) }}
+  {% if help %}<div class="form-text">{{ help|safe }}</div>{% endif %}
+  {% for e in field.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
+
+{# Standardized form footer: submit button + optional cancel link.
+   Always renders submit on the left, cancel on the right, in a flex row. #}
+{% macro render_submit(form, cancel_url=None, cancel_label=None) %}
+<div class="d-flex gap-2 mt-4">
+  {{ form.submit() }}
+  {% if cancel_url %}
+  <a href="{{ cancel_url }}" class="btn btn-outline-secondary">{{ cancel_label or _('Cancel') }}</a>
+  {% endif %}
+</div>
+{% endmacro %}
+
+
+{# Render a group of BooleanFields as a checkbox list, optionally inside a fieldset with legend. #}
+{% macro render_checkbox_group(fields, legend=None) %}
+{% if legend %}
+<fieldset class="mb-3">
+  <legend class="form-label fs-6 fw-semibold">{{ legend }}</legend>
+{% else %}
+<div class="mb-3">
+{% endif %}
+  {% for field in fields %}
+  <div class="form-check">
+    {{ field() }}
+    {{ field.label(class="form-check-label") }}
+  </div>
+  {% endfor %}
+{% if legend %}
+</fieldset>
+{% else %}
+</div>
+{% endif %}
+{% endmacro %}

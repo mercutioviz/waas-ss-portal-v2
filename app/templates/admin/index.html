@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Admin Dashboard') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Admin'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-gear"></i> {{ _('Admin Dashboard') }}</h2>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-people display-4 text-primary"></i>
+                <h3 class="mt-2">{{ user_count }}</h3>
+                <p class="text-muted mb-0">{{ _('Total Users') }} ({{ active_users }} {{ _('active') }})</p>
+            </div>
+            <div class="card-footer"><a href="{{ url_for('admin.list_users') }}" class="text-decoration-none">{{ _('Manage Users') }} <i class="bi bi-arrow-right"></i></a></div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-key display-4 text-success"></i>
+                <h3 class="mt-2">{{ account_count }}</h3>
+                <p class="text-muted mb-0">{{ _('WaaS Accounts') }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-journal-text display-4 text-info"></i>
+                <p class="text-muted mb-2">{{ _('Audit Log') }}</p>
+            </div>
+            <div class="card-footer"><a href="{{ url_for('admin.audit_log') }}" class="text-decoration-none">{{ _('View Audit Log') }} <i class="bi bi-arrow-right"></i></a></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-clock-history"></i> {{ _('Recent Activity') }}</h5></div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr><th>{{ _('Time') }}</th><th>{{ _('User') }}</th><th>{{ _('Action') }}</th><th>{{ _('Details') }}</th></tr>
+                </thead>
+                <tbody>
+                    {% for log in recent_logs %}
+                    <tr>
+                        <td><small>{{ log.timestamp.strftime('%Y-%m-%d %H:%M') if log.timestamp else 'N/A' }}</small></td>
+                        <td>{{ log.user.username if log.user else 'N/A' }}</td>
+                        <td><span class="badge bg-secondary">{{ log.action }}</span></td>
+                        <td><small>{{ log.details or '—' }}</small></td>
+                    </tr>
+                    {% endfor %}
+                    {% if not recent_logs %}
+                    <tr><td colspan="4" class="text-center text-muted py-3">{{ _('No recent activity.') }}</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

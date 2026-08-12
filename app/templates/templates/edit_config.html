@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Edit Config') }} - {{ template.name }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('templates.list_templates') }}">{{ _('Config Templates') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('templates.view_template', template_id=template.id) }}">{{ template.name }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Edit Config') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-4">
+    <h2><i class="bi bi-code-slash"></i> {{ _('Edit Configuration Data') }}</h2>
+    <p class="text-muted">{{ _('Template:') }} <strong>{{ template.name }}</strong></p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" id="configForm" class="needs-validation" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="mb-3">
+                <label for="config_data" class="form-label">{{ _('Configuration JSON') }}</label>
+                <textarea name="config_data" id="config_data" class="form-control font-monospace"
+                          rows="20" style="font-size: 0.85em; tab-size: 2;">{{ template.config_dict | tojson(indent=2) }}</textarea>
+                <div class="form-text">{{ _('Enter valid JSON. Only fields present in the template will be applied to applications.') }}</div>
+                <div id="jsonError" class="invalid-feedback"></div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle"></i> {{ _('Save Configuration') }}</button>
+                <a href="{{ url_for('templates.view_template', template_id=template.id) }}" class="btn btn-secondary">{{ _('Cancel') }}</a>
+                <button type="button" class="btn btn-outline-secondary" id="formatBtn"><i class="bi bi-braces"></i> {{ _('Format JSON') }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const textarea = document.getElementById('config_data');
+    const errorDiv = document.getElementById('jsonError');
+    const form = document.getElementById('configForm');
+    const formatBtn = document.getElementById('formatBtn');
+
+    function validateJson() {
+        try {
+            JSON.parse(textarea.value);
+            textarea.classList.remove('is-invalid');
+            errorDiv.textContent = '';
+            return true;
+        } catch (e) {
+            textarea.classList.add('is-invalid');
+            errorDiv.textContent = '{{ _('Invalid JSON:') }} ' + e.message;
+            return false;
+        }
+    }
+
+    form.addEventListener('submit', function(e) {
+        if (!validateJson()) {
+            e.preventDefault();
+        }
+    });
+
+    formatBtn.addEventListener('click', function() {
+        try {
+            const parsed = JSON.parse(textarea.value);
+            textarea.value = JSON.stringify(parsed, null, 2);
+            textarea.classList.remove('is-invalid');
+            errorDiv.textContent = '';
+        } catch (e) {
+            textarea.classList.add('is-invalid');
+            errorDiv.textContent = '{{ _('Cannot format:') }} ' + e.message;
+        }
+    });
+
+    // Tab key inserts spaces instead of changing focus
+    textarea.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+            this.selectionStart = this.selectionEnd = start + 2;
+        }
+    });
+})();
+</script>
+{% endblock %}

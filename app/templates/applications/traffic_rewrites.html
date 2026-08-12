@@ -1,0 +1,954 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Traffic Rewrites') }} — {{ app_id }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications') }}">{{ _('Applications') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}">{{ app_id }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Traffic Rewrites') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-arrow-left-right"></i> {{ _('Traffic Rewrites') }} <small class="text-muted fs-6">{{ app_id }}</small></h2>
+    <a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> {{ _('Back to Application') }}
+    </a>
+</div>
+
+<p class="text-muted mb-4">
+    {{ _('Traffic rewrites let you modify HTTP requests, responses, and response bodies as they pass through the WAF, without changing your origin server. Use the sequence number (1–1500) to control rule order — lower numbers run first.') }}
+</p>
+
+<!-- Tab navigation -->
+<ul class="nav nav-tabs mb-0" id="rewriteTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if active_tab == 'request' %}active{% endif %}" id="tab-request" data-bs-toggle="tab" data-bs-target="#pane-request" type="button" role="tab">
+            <i class="bi bi-arrow-up-circle"></i> {{ _('Request') }}
+            <span class="badge bg-secondary ms-1">{{ rules.request | length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if active_tab == 'response' %}active{% endif %}" id="tab-response" data-bs-toggle="tab" data-bs-target="#pane-response" type="button" role="tab">
+            <i class="bi bi-arrow-down-circle"></i> {{ _('Response') }}
+            <span class="badge bg-secondary ms-1">{{ rules.response | length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if active_tab == 'body' %}active{% endif %}" id="tab-body" data-bs-toggle="tab" data-bs-target="#pane-body" type="button" role="tab">
+            <i class="bi bi-file-text"></i> {{ _('Response Body') }}
+            <span class="badge bg-secondary ms-1">{{ rules.body | length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if active_tab == 'url_translation' %}active{% endif %}" id="tab-url-translation" data-bs-toggle="tab" data-bs-target="#pane-url-translation" type="button" role="tab">
+            <i class="bi bi-link-45deg"></i> {{ _('URL Translation') }}
+            <span class="badge bg-secondary ms-1">{{ rules.url_translation | length }}</span>
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content border border-top-0 rounded-bottom bg-white p-3" id="rewriteTabContent">
+
+    {# ===== REQUEST REWRITE TAB ===== #}
+    <div class="tab-pane fade {% if active_tab == 'request' %}show active{% endif %}" id="pane-request" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <p class="mb-0 text-muted small">{{ _('Add or modify request headers, rewrite URLs, or redirect requests before they reach your origin.') }}</p>
+            {% if user_can_write %}
+            <button class="btn btn-sm btn-outline-success" data-bs-toggle="collapse" data-bs-target="#addRequestRewrite">
+                <i class="bi bi-plus-circle"></i> {{ _('Add Rule') }}
+            </button>
+            {% endif %}
+        </div>
+
+        {# Template picker + add form #}
+        {% if user_can_write %}
+        <div class="collapse mb-3" id="addRequestRewrite">
+            <div class="card card-body bg-light">
+                <h6 class="mb-3"><i class="bi bi-grid"></i> {{ _('Choose a starting template or start from scratch') }}</h6>
+                <div class="row g-2 mb-3" id="requestTemplates">
+                    {% set req_templates = [
+                        {'label': _('Forward Client IP'), 'icon': 'bi-person-badge', 'desc': _('Add X-Forwarded-For header with client IP'), 'action': 'Insert Header', 'header': 'X-Forwarded-For', 'rewrite_value_type': 'constant', 'rewrite_value': '$SRC_ADDR', 'condition': '*', 'continue_processing': false},
+                        {'label': _('Country Code Header'), 'icon': 'bi-geo-alt', 'desc': _('Add X-Country-Code header from client geo'), 'action': 'Insert Header', 'header': 'X-Country-Code', 'rewrite_value_type': 'constant', 'rewrite_value': '$COUNTRY_CODE', 'condition': '*', 'continue_processing': false},
+                        {'label': _('Add Real IP'), 'icon': 'bi-hdd-network', 'desc': _('Add X-Real-IP header with source address'), 'action': 'Insert Header', 'header': 'X-Real-IP', 'rewrite_value_type': 'constant', 'rewrite_value': '$SRC_ADDR', 'condition': '*', 'continue_processing': false},
+                        {'label': _('Client Cert Subject'), 'icon': 'bi-patch-check', 'desc': _('Pass mTLS certificate subject as a header'), 'action': 'Insert Header', 'header': 'X-Client-Cert-Subject', 'rewrite_value_type': 'constant', 'rewrite_value': '$X509_SUBJECT', 'condition': '*', 'continue_processing': false},
+                        {'label': _('Remove Header'), 'icon': 'bi-dash-circle', 'desc': _('Strip a named request header'), 'action': 'Remove Header', 'header': '', 'rewrite_value_type': 'constant', 'rewrite_value': '', 'condition': '*', 'continue_processing': false},
+                        {'label': _('Blank'), 'icon': 'bi-pencil-square', 'desc': _('Start from scratch'), 'action': 'Insert Header', 'header': '', 'rewrite_value_type': 'constant', 'rewrite_value': '', 'condition': '*', 'continue_processing': false},
+                    ] %}
+                    {% for tpl in req_templates %}
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <button type="button" class="btn btn-outline-primary w-100 h-100 text-start rewrite-template-btn"
+                            data-target="request"
+                            data-action="{{ tpl.action }}"
+                            data-header="{{ tpl.header }}"
+                            data-rewrite-value-type="{{ tpl.rewrite_value_type }}"
+                            data-rewrite-value="{{ tpl.rewrite_value }}"
+                            data-condition="{{ tpl.condition }}"
+                            data-continue="{{ tpl.continue_processing | tojson }}">
+                            <i class="bi {{ tpl.icon }} d-block fs-4 mb-1"></i>
+                            <span class="fw-semibold small">{{ tpl.label }}</span>
+                            <span class="d-block text-muted" style="font-size:.75rem">{{ tpl.desc }}</span>
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <form id="requestRewriteCreateForm" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Rule Name') }} <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" name="name" required placeholder="e.g., add-client-ip">
+                        </div>
+                        <div class="col-md-1">
+                            <label class="form-label" title="{{ _('1–1500, lower runs first') }}">{{ _('Seq #') }}</label>
+                            <input type="number" class="form-control form-control-sm" name="sequence_number" min="1" max="1500" value="100" placeholder="100">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Action') }}</label>
+                            <select class="form-select form-select-sm rw-action-select" name="action" data-type="request">
+                                {% for a in ['Insert Header', 'Remove Header', 'Rewrite Header', 'Rewrite URL', 'Redirect URL'] %}
+                                <option value="{{ a }}">{{ a }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-2 rw-header-field">
+                            <label class="form-label">{{ _('Header Name') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="header" placeholder="e.g., X-Custom">
+                        </div>
+                        <div class="col-md-2 rw-value-type-field">
+                            <label class="form-label">{{ _('Value Type') }}</label>
+                            <select class="form-select form-select-sm" name="rewrite_value_type">
+                                <option value="constant">constant</option>
+                                <option value="request">request</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 rw-old-value-field">
+                            <label class="form-label">{{ _('Old Value') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="old_value" placeholder="{{ _('match pattern') }}">
+                        </div>
+                        <div class="col-md-3 rw-rewrite-value-field">
+                            <label class="form-label">{{ _('Rewrite Value') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="rewrite_value" placeholder="e.g., $SRC_ADDR">
+                            <div class="form-text">{{ _('Macros:') }} <code>$SRC_ADDR</code> <code>$URI</code> <code>$COUNTRY_CODE</code> <a href="#" class="rw-more-macros-link" data-type="request">{{ _('more…') }}</a></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Condition') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="condition" value="*" placeholder="*">
+                            <div class="form-text">{{ _('* = all') }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Continue') }}</label>
+                            <select class="form-select form-select-sm" name="continue_processing">
+                                <option value="false">{{ _('Stop on match') }}</option>
+                                <option value="true">{{ _('Continue') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Comments') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="comments" placeholder="{{ _('Optional notes') }}">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> {{ _('Create Rule') }}</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#addRequestRewrite">{{ _('Cancel') }}</button>
+                        <span class="field-status ms-2"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        {# Rules table #}
+        {% if rules.request %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Seq') }}</th>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Action') }}</th>
+                        <th>{{ _('Header') }}</th>
+                        <th>{{ _('Rewrite Value') }}</th>
+                        <th>{{ _('Condition') }}</th>
+                        <th>{{ _('Continue') }}</th>
+                        {% if user_can_write %}<th></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in rules.request | sort(attribute='sequence_number') %}
+                    <tr>
+                        <td><span class="badge bg-light text-dark border">{{ rule.get('sequence_number', '—') }}</span></td>
+                        <td><strong>{{ rule.get('name', '—') }}</strong>{% if rule.get('comments') %} <small class="text-muted">{{ rule.comments }}</small>{% endif %}</td>
+                        <td><span class="badge bg-primary">{{ rule.get('action', '—') }}</span></td>
+                        <td><code>{{ rule.get('header', '—') | null_dash }}</code></td>
+                        <td><code class="text-break">{{ rule.get('rewrite_value', '—') | null_dash }}</code></td>
+                        <td><code>{{ rule.get('condition', '*') }}</code></td>
+                        <td>{% if rule.get('continue_processing') %}<span class="badge bg-warning text-dark">{{ _('Yes') }}</span>{% else %}<span class="badge bg-secondary">{{ _('No') }}</span>{% endif %}</td>
+                        {% if user_can_write %}
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editReq-{{ loop.index }}" title="{{ _('Edit') }}"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-danger btn-delete-rewrite" data-type="request" data-rule-name="{{ rule.get('name', '') }}" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" title="{{ _('Delete') }}"><i class="bi bi-trash"></i></button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% if user_can_write %}
+                    <tr class="collapse" id="editReq-{{ loop.index }}">
+                        <td colspan="8" class="bg-light">
+                            <form class="rewrite-edit-form p-2" data-type="request" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" data-rule-name="{{ rule.get('name', '') }}">
+                                <div class="row g-2">
+                                    <div class="col-md-1">
+                                        <label class="form-label">{{ _('Seq #') }}</label>
+                                        <input type="number" class="form-control form-control-sm" name="sequence_number" min="1" max="1500" value="{{ rule.get('sequence_number', 100) }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Action') }}</label>
+                                        <select class="form-select form-select-sm" name="action">
+                                            {% for a in ['Insert Header', 'Remove Header', 'Rewrite Header', 'Rewrite URL', 'Redirect URL'] %}
+                                            <option value="{{ a }}" {{ 'selected' if rule.get('action') == a }}>{{ a }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Header') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="header" value="{{ rule.get('header', '') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Value Type') }}</label>
+                                        <select class="form-select form-select-sm" name="rewrite_value_type">
+                                            <option value="constant" {{ 'selected' if rule.get('rewrite_value_type', 'constant') == 'constant' }}>constant</option>
+                                            <option value="request" {{ 'selected' if rule.get('rewrite_value_type') == 'request' }}>request</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Old Value') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="old_value" value="{{ rule.get('old_value', '') }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Rewrite Value') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="rewrite_value" value="{{ rule.get('rewrite_value', '') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Condition') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="condition" value="{{ rule.get('condition', '*') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Continue') }}</label>
+                                        <select class="form-select form-select-sm" name="continue_processing">
+                                            <option value="false" {{ 'selected' if not rule.get('continue_processing') }}>{{ _('Stop on match') }}</option>
+                                            <option value="true" {{ 'selected' if rule.get('continue_processing') }}>{{ _('Continue') }}</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Comments') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="comments" value="{{ rule.get('comments', '') }}">
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-circle"></i> {{ _('Save') }}</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#editReq-{{ loop.index }}">{{ _('Cancel') }}</button>
+                                    <span class="field-status ms-2"></span>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-3 mb-0">{{ _('No request rewrite rules configured.') }}</p>
+        {% endif %}
+    </div>
+
+    {# ===== RESPONSE REWRITE TAB ===== #}
+    <div class="tab-pane fade {% if active_tab == 'response' %}show active{% endif %}" id="pane-response" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <p class="mb-0 text-muted small">{{ _('Add, modify, or remove response headers before they reach the client. Common use: adding security headers.') }}</p>
+            {% if user_can_write %}
+            <button class="btn btn-sm btn-outline-success" data-bs-toggle="collapse" data-bs-target="#addResponseRewrite">
+                <i class="bi bi-plus-circle"></i> {{ _('Add Rule') }}
+            </button>
+            {% endif %}
+        </div>
+
+        {% if user_can_write %}
+        <div class="collapse mb-3" id="addResponseRewrite">
+            <div class="card card-body bg-light">
+                <h6 class="mb-3"><i class="bi bi-grid"></i> {{ _('Choose a starting template or start from scratch') }}</h6>
+                <div class="row g-2 mb-3">
+                    {% set resp_templates = [
+                        {'label': _('HSTS Header'), 'icon': 'bi-shield-lock', 'desc': _('Force HTTPS with Strict-Transport-Security'), 'action': 'Insert Header', 'header': 'Strict-Transport-Security', 'rewrite_value': 'max-age=31536000; includeSubDomains', 'condition': '*'},
+                        {'label': _('X-Frame-Options'), 'icon': 'bi-aspect-ratio', 'desc': _('Prevent clickjacking (SAMEORIGIN)'), 'action': 'Insert Header', 'header': 'X-Frame-Options', 'rewrite_value': 'SAMEORIGIN', 'condition': '*'},
+                        {'label': _('X-Content-Type'), 'icon': 'bi-file-binary', 'desc': _('Prevent MIME sniffing attacks'), 'action': 'Insert Header', 'header': 'X-Content-Type-Options', 'rewrite_value': 'nosniff', 'condition': '*'},
+                        {'label': _('Remove Server'), 'icon': 'bi-eye-slash', 'desc': _('Remove Server header from responses'), 'action': 'Remove Header', 'header': 'Server', 'rewrite_value': '', 'condition': '*'},
+                        {'label': _('Remove X-Powered-By'), 'icon': 'bi-x-circle', 'desc': _('Remove X-Powered-By header'), 'action': 'Remove Header', 'header': 'X-Powered-By', 'rewrite_value': '', 'condition': '*'},
+                        {'label': _('Blank'), 'icon': 'bi-pencil-square', 'desc': _('Start from scratch'), 'action': 'Insert Header', 'header': '', 'rewrite_value': '', 'condition': '*'},
+                    ] %}
+                    {% for tpl in resp_templates %}
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <button type="button" class="btn btn-outline-primary w-100 h-100 text-start rewrite-template-btn"
+                            data-target="response"
+                            data-action="{{ tpl.action }}"
+                            data-header="{{ tpl.header }}"
+                            data-rewrite-value="{{ tpl.rewrite_value }}"
+                            data-condition="{{ tpl.condition }}"
+                            data-continue="false">
+                            <i class="bi {{ tpl.icon }} d-block fs-4 mb-1"></i>
+                            <span class="fw-semibold small">{{ tpl.label }}</span>
+                            <span class="d-block text-muted" style="font-size:.75rem">{{ tpl.desc }}</span>
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <form id="responseRewriteCreateForm" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Rule Name') }} <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" name="name" required placeholder="e.g., add-hsts">
+                        </div>
+                        <div class="col-md-1">
+                            <label class="form-label" title="{{ _('1–1500, lower runs first') }}">{{ _('Seq #') }}</label>
+                            <input type="number" class="form-control form-control-sm" name="sequence_number" min="1" max="1500" value="100">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Action') }}</label>
+                            <select class="form-select form-select-sm" name="action">
+                                {% for a in ['Insert Header', 'Remove Header', 'Rewrite Header'] %}
+                                <option value="{{ a }}">{{ a }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Header Name') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="header" placeholder="e.g., X-Frame-Options">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Old Value') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="old_value" placeholder="{{ _('match pattern') }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Rewrite Value') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="rewrite_value" placeholder="e.g., SAMEORIGIN">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Condition') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="condition" value="*">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Continue') }}</label>
+                            <select class="form-select form-select-sm" name="continue_processing">
+                                <option value="false">{{ _('Stop on match') }}</option>
+                                <option value="true">{{ _('Continue') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Comments') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="comments" placeholder="{{ _('Optional notes') }}">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> {{ _('Create Rule') }}</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#addResponseRewrite">{{ _('Cancel') }}</button>
+                        <span class="field-status ms-2"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if rules.response %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Seq') }}</th>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Action') }}</th>
+                        <th>{{ _('Header') }}</th>
+                        <th>{{ _('Rewrite Value') }}</th>
+                        <th>{{ _('Condition') }}</th>
+                        <th>{{ _('Continue') }}</th>
+                        {% if user_can_write %}<th></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in rules.response | sort(attribute='sequence_number') %}
+                    <tr>
+                        <td><span class="badge bg-light text-dark border">{{ rule.get('sequence_number', '—') }}</span></td>
+                        <td><strong>{{ rule.get('name', '—') }}</strong>{% if rule.get('comments') %} <small class="text-muted">{{ rule.comments }}</small>{% endif %}</td>
+                        <td><span class="badge bg-info text-dark">{{ rule.get('action', '—') }}</span></td>
+                        <td><code>{{ rule.get('header', '—') | null_dash }}</code></td>
+                        <td><code class="text-break">{{ rule.get('rewrite_value', '—') | null_dash }}</code></td>
+                        <td><code>{{ rule.get('condition', '*') }}</code></td>
+                        <td>{% if rule.get('continue_processing') %}<span class="badge bg-warning text-dark">{{ _('Yes') }}</span>{% else %}<span class="badge bg-secondary">{{ _('No') }}</span>{% endif %}</td>
+                        {% if user_can_write %}
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editResp-{{ loop.index }}" title="{{ _('Edit') }}"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-danger btn-delete-rewrite" data-type="response" data-rule-name="{{ rule.get('name', '') }}" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" title="{{ _('Delete') }}"><i class="bi bi-trash"></i></button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% if user_can_write %}
+                    <tr class="collapse" id="editResp-{{ loop.index }}">
+                        <td colspan="8" class="bg-light">
+                            <form class="rewrite-edit-form p-2" data-type="response" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" data-rule-name="{{ rule.get('name', '') }}">
+                                <div class="row g-2">
+                                    <div class="col-md-1">
+                                        <label class="form-label">{{ _('Seq #') }}</label>
+                                        <input type="number" class="form-control form-control-sm" name="sequence_number" min="1" max="1500" value="{{ rule.get('sequence_number', 100) }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Action') }}</label>
+                                        <select class="form-select form-select-sm" name="action">
+                                            {% for a in ['Insert Header', 'Remove Header', 'Rewrite Header'] %}
+                                            <option value="{{ a }}" {{ 'selected' if rule.get('action') == a }}>{{ a }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Header') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="header" value="{{ rule.get('header', '') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Old Value') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="old_value" value="{{ rule.get('old_value', '') }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Rewrite Value') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="rewrite_value" value="{{ rule.get('rewrite_value', '') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Condition') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="condition" value="{{ rule.get('condition', '*') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Continue') }}</label>
+                                        <select class="form-select form-select-sm" name="continue_processing">
+                                            <option value="false" {{ 'selected' if not rule.get('continue_processing') }}>{{ _('Stop on match') }}</option>
+                                            <option value="true" {{ 'selected' if rule.get('continue_processing') }}>{{ _('Continue') }}</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Comments') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="comments" value="{{ rule.get('comments', '') }}">
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-circle"></i> {{ _('Save') }}</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#editResp-{{ loop.index }}">{{ _('Cancel') }}</button>
+                                    <span class="field-status ms-2"></span>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-3 mb-0">{{ _('No response rewrite rules configured.') }}</p>
+        {% endif %}
+    </div>
+
+    {# ===== RESPONSE BODY REWRITE TAB ===== #}
+    <div class="tab-pane fade {% if active_tab == 'body' %}show active{% endif %}" id="pane-body" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <p class="mb-0 text-muted small">{{ _('Search and replace text in HTML/text response bodies. Only applies to text/* content types. Wildcards supported in URL path.') }}</p>
+            {% if user_can_write %}
+            <button class="btn btn-sm btn-outline-success" data-bs-toggle="collapse" data-bs-target="#addBodyRewrite">
+                <i class="bi bi-plus-circle"></i> {{ _('Add Rule') }}
+            </button>
+            {% endif %}
+        </div>
+
+        {% if user_can_write %}
+        <div class="collapse mb-3" id="addBodyRewrite">
+            <div class="card card-body bg-light">
+                <h6 class="mb-3"><i class="bi bi-grid"></i> {{ _('Choose a starting template or start from scratch') }}</h6>
+                <div class="row g-2 mb-3">
+                    {% set body_templates = [
+                        {'label': _('Replace Domain'), 'icon': 'bi-globe', 'desc': _('Swap old domain for new in body'), 'url': '/*', 'host': '*', 'search_string': 'http://old.example.com', 'replace_string': 'https://new.example.com'},
+                        {'label': _('HTTP → HTTPS'), 'icon': 'bi-lock', 'desc': _('Rewrite HTTP links to HTTPS in body'), 'url': '/*', 'host': '*', 'search_string': 'http://', 'replace_string': 'https://'},
+                        {'label': _('Blank'), 'icon': 'bi-pencil-square', 'desc': _('Start from scratch'), 'url': '/*', 'host': '*', 'search_string': '', 'replace_string': ''},
+                    ] %}
+                    {% for tpl in body_templates %}
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <button type="button" class="btn btn-outline-primary w-100 h-100 text-start rewrite-template-btn"
+                            data-target="body"
+                            data-url="{{ tpl.url }}"
+                            data-host="{{ tpl.host }}"
+                            data-search-string="{{ tpl.search_string }}"
+                            data-replace-string="{{ tpl.replace_string }}">
+                            <i class="bi {{ tpl.icon }} d-block fs-4 mb-1"></i>
+                            <span class="fw-semibold small">{{ tpl.label }}</span>
+                            <span class="d-block text-muted" style="font-size:.75rem">{{ tpl.desc }}</span>
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <form id="bodyRewriteCreateForm" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Rule Name') }} <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" name="name" required placeholder="e.g., replace-domain">
+                        </div>
+                        <div class="col-md-1">
+                            <label class="form-label" title="{{ _('1–1500, lower runs first') }}">{{ _('Seq #') }}</label>
+                            <input type="number" class="form-control form-control-sm" name="sequence_number" min="1" max="1500" value="100">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('URL Pattern') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="url" value="/*" placeholder="/* or /path/*">
+                            <div class="form-text">{{ _('Wildcard URL path filter') }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Host') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="host" value="*" placeholder="* or hostname">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ _('Search String') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="search_string" placeholder="{{ _('Text to find') }}">
+                            <div class="form-text">{{ _('Plain text only — no regex, no \\r\\n') }}</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ _('Replace String') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="replace_string" placeholder="{{ _('Replacement text') }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ _('Comments') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="comments" placeholder="{{ _('Optional notes') }}">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> {{ _('Create Rule') }}</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#addBodyRewrite">{{ _('Cancel') }}</button>
+                        <span class="field-status ms-2"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if rules.body %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Seq') }}</th>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('URL Pattern') }}</th>
+                        <th>{{ _('Host') }}</th>
+                        <th>{{ _('Search') }}</th>
+                        <th>{{ _('Replace') }}</th>
+                        {% if user_can_write %}<th></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in rules.body | sort(attribute='sequence_number') %}
+                    <tr>
+                        <td><span class="badge bg-light text-dark border">{{ rule.get('sequence_number', '—') }}</span></td>
+                        <td><strong>{{ rule.get('name', '—') }}</strong>{% if rule.get('comments') %} <small class="text-muted">{{ rule.comments }}</small>{% endif %}</td>
+                        <td><code>{{ rule.get('url', '/*') }}</code></td>
+                        <td><code>{{ rule.get('host', '*') }}</code></td>
+                        <td><code class="text-break">{{ rule.get('search_string', '—') }}</code></td>
+                        <td><code class="text-break">{{ rule.get('replace_string', '—') }}</code></td>
+                        {% if user_can_write %}
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editBody-{{ loop.index }}" title="{{ _('Edit') }}"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-danger btn-delete-rewrite" data-type="body" data-rule-name="{{ rule.get('name', '') }}" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" title="{{ _('Delete') }}"><i class="bi bi-trash"></i></button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% if user_can_write %}
+                    <tr class="collapse" id="editBody-{{ loop.index }}">
+                        <td colspan="7" class="bg-light">
+                            <form class="rewrite-edit-form p-2" data-type="body" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" data-rule-name="{{ rule.get('name', '') }}">
+                                <div class="row g-2">
+                                    <div class="col-md-1">
+                                        <label class="form-label">{{ _('Seq #') }}</label>
+                                        <input type="number" class="form-control form-control-sm" name="sequence_number" min="1" max="1500" value="{{ rule.get('sequence_number', 100) }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('URL Pattern') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="url" value="{{ rule.get('url', '/*') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Host') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="host" value="{{ rule.get('host', '*') }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Search String') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="search_string" value="{{ rule.get('search_string', '') }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Replace String') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="replace_string" value="{{ rule.get('replace_string', '') }}">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">{{ _('Comments') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="comments" value="{{ rule.get('comments', '') }}">
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-circle"></i> {{ _('Save') }}</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#editBody-{{ loop.index }}">{{ _('Cancel') }}</button>
+                                    <span class="field-status ms-2"></span>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-3 mb-0">{{ _('No response body rewrite rules configured.') }}</p>
+        {% endif %}
+    </div>
+
+    {# ===== URL TRANSLATION TAB ===== #}
+    <div class="tab-pane fade {% if active_tab == 'url_translation' %}show active{% endif %}" id="pane-url-translation" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <p class="mb-0 text-muted small">{{ _('Map internal server domains/paths to external-facing URLs. No sequence number — all rules are evaluated.') }}</p>
+            {% if user_can_write %}
+            <button class="btn btn-sm btn-outline-success" data-bs-toggle="collapse" data-bs-target="#addUrlTranslation">
+                <i class="bi bi-plus-circle"></i> {{ _('Add Translation') }}
+            </button>
+            {% endif %}
+        </div>
+
+        {% if user_can_write %}
+        <div class="collapse mb-3" id="addUrlTranslation">
+            <div class="card card-body bg-light">
+                <h6 class="mb-3"><i class="bi bi-grid"></i> {{ _('Choose a starting template or start from scratch') }}</h6>
+                <div class="row g-2 mb-3">
+                    {% set url_tpl_list = [
+                        {'label': _('Path Prefix Map'), 'icon': 'bi-diagram-2', 'desc': _('Map /internal/path to /external/path'), 'inside_prefix': '/internal', 'outside_prefix': '/external', 'inside_domain': '', 'outside_domain': ''},
+                        {'label': _('Domain Alias'), 'icon': 'bi-globe2', 'desc': _('Map internal hostname to public domain'), 'inside_prefix': '/', 'outside_prefix': '/', 'inside_domain': 'internal.example.com', 'outside_domain': 'www.example.com'},
+                        {'label': _('Blank'), 'icon': 'bi-pencil-square', 'desc': _('Start from scratch'), 'inside_prefix': '/', 'outside_prefix': '/', 'inside_domain': '', 'outside_domain': ''},
+                    ] %}
+                    {% for tpl in url_tpl_list %}
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <button type="button" class="btn btn-outline-primary w-100 h-100 text-start rewrite-template-btn"
+                            data-target="url_translation"
+                            data-inside-prefix="{{ tpl.inside_prefix }}"
+                            data-outside-prefix="{{ tpl.outside_prefix }}"
+                            data-inside-domain="{{ tpl.inside_domain }}"
+                            data-outside-domain="{{ tpl.outside_domain }}">
+                            <i class="bi {{ tpl.icon }} d-block fs-4 mb-1"></i>
+                            <span class="fw-semibold small">{{ tpl.label }}</span>
+                            <span class="d-block text-muted" style="font-size:.75rem">{{ tpl.desc }}</span>
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <form id="urlTranslationCreateForm" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Rule Name') }} <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" name="name" required placeholder="e.g., map-internal-path">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Inside Prefix') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="inside_prefix" placeholder="/internal">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">{{ _('Outside Prefix') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="outside_prefix" placeholder="/external">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Inside Domain') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="inside_domain" placeholder="internal.example.com">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">{{ _('Outside Domain') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="outside_domain" placeholder="www.example.com">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ _('Comments') }}</label>
+                            <input type="text" class="form-control form-control-sm" name="comments" placeholder="{{ _('Optional notes') }}">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> {{ _('Create Translation') }}</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#addUrlTranslation">{{ _('Cancel') }}</button>
+                        <span class="field-status ms-2"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if rules.url_translation %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Inside Domain') }}</th>
+                        <th>{{ _('Inside Prefix') }}</th>
+                        <th>{{ _('Outside Domain') }}</th>
+                        <th>{{ _('Outside Prefix') }}</th>
+                        {% if user_can_write %}<th></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in rules.url_translation %}
+                    <tr>
+                        <td><strong>{{ rule.get('name', '—') }}</strong>{% if rule.get('comments') %} <small class="text-muted">{{ rule.comments }}</small>{% endif %}</td>
+                        <td><code>{{ rule.get('inside_domain', '—') | null_dash }}</code></td>
+                        <td><code>{{ rule.get('inside_prefix', '—') | null_dash }}</code></td>
+                        <td><code>{{ rule.get('outside_domain', '—') | null_dash }}</code></td>
+                        <td><code>{{ rule.get('outside_prefix', '—') | null_dash }}</code></td>
+                        {% if user_can_write %}
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editUrlTrans-{{ loop.index }}" title="{{ _('Edit') }}"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-danger btn-delete-rewrite" data-type="url_translation" data-rule-name="{{ rule.get('name', '') }}" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" title="{{ _('Delete') }}"><i class="bi bi-trash"></i></button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% if user_can_write %}
+                    <tr class="collapse" id="editUrlTrans-{{ loop.index }}">
+                        <td colspan="6" class="bg-light">
+                            <form class="rewrite-edit-form p-2" data-type="url_translation" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" data-rule-name="{{ rule.get('name', '') }}">
+                                <div class="row g-2">
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Inside Prefix') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="inside_prefix" value="{{ rule.get('inside_prefix', '') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Outside Prefix') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="outside_prefix" value="{{ rule.get('outside_prefix', '') }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Inside Domain') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="inside_domain" value="{{ rule.get('inside_domain', '') }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Outside Domain') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="outside_domain" value="{{ rule.get('outside_domain', '') }}">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">{{ _('Comments') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="comments" value="{{ rule.get('comments', '') }}">
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-circle"></i> {{ _('Save') }}</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#editUrlTrans-{{ loop.index }}">{{ _('Cancel') }}</button>
+                                    <span class="field-status ms-2"></span>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-3 mb-0">{{ _('No URL translation rules configured.') }}</p>
+        {% endif %}
+    </div>
+
+</div>{# end tab-content #}
+
+{# Macro reference modal #}
+<div class="modal fade" id="macroReferenceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-braces"></i> {{ _('Available Macros') }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h6>{{ _('Request Rewrite macros') }} <small class="text-muted">({{ _('use in Rewrite Value field') }})</small></h6>
+                <table class="table table-sm table-bordered">
+                    <thead class="table-light"><tr><th>{{ _('Macro') }}</th><th>{{ _('Description') }}</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>$SRC_ADDR</code></td><td>{{ _('Client (source) IP address') }}</td></tr>
+                        <tr><td><code>$URI</code></td><td>{{ _('Complete request URI including query string') }}</td></tr>
+                        <tr><td><code>$COUNTRY_CODE</code></td><td>{{ _('Two-letter country code of the client') }}</td></tr>
+                        <tr><td><code>$X509_SUBJECT</code></td><td>{{ _('mTLS certificate subject') }}</td></tr>
+                        <tr><td><code>$X509_ISSUER</code></td><td>{{ _('mTLS certificate issuer') }}</td></tr>
+                        <tr><td><code>$X509_SERIAL_NUMBER</code></td><td>{{ _('Certificate serial number') }}</td></tr>
+                        <tr><td><code>$X509_HASH</code></td><td>{{ _('Certificate hash') }}</td></tr>
+                        <tr><td><code>$X509_WHOLE</code></td><td>{{ _('Full certificate in PEM format') }}</td></tr>
+                        <tr><td><code>X509_SAN_EMAIL</code></td><td>{{ _('Certificate SAN email field') }}</td></tr>
+                        <tr><td><code>X509_IAN_EMAIL</code></td><td>{{ _('Certificate IAN email field') }}</td></tr>
+                    </tbody>
+                </table>
+                <p class="text-muted small">{{ _('Additional X.509 macros: $X509_VERSION, $X509_SIGNATURE_ALGORITHM, $X509_NOT_VALID_BEFORE, $X509_NOT_VALID_AFTER, $X509_SUBJECT_PUBLIC_KEY_TYPE, $X509_SUBJECT_PUBLIC_KEY, $X509_SUBJECT_PUBLIC_KEY_RSA_BITS, $X509_EXTENSIONS') }}</p>
+                <hr>
+                <h6>{{ _('Response/Body macros') }}</h6>
+                <p class="text-muted small">{{ _('A subset of request macros is available in response rewrite and body rewrite replace fields. Refer to the WaaS documentation for the current supported list.') }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const csrfToken = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '{{ csrf_token() }}';
+
+    function rewriteTypeToUrl(type, action) {
+        const typeMap = {
+            'request': 'request',
+            'response': 'response',
+            'body': 'body',
+            'url_translation': 'url-translation',
+        };
+        return `/applications/${typeMap[type]}`;
+    }
+
+    function buildUrl(accountId, appId, rewriteType, action) {
+        const slug = { request: 'request', response: 'response', body: 'body', url_translation: 'url-translation' }[rewriteType];
+        return `/applications/${accountId}/${appId}/rewrites/${slug}/${action}`;
+    }
+
+    function showStatus(el, msg, ok) {
+        el.textContent = msg;
+        el.className = 'field-status ms-2 ' + (ok ? 'text-success' : 'text-danger');
+        if (ok) setTimeout(() => { el.textContent = ''; }, 3000);
+    }
+
+    function serializeForm(form) {
+        const data = {};
+        new FormData(form).forEach((v, k) => {
+            if (k === 'continue_processing') { data[k] = v === 'true'; return; }
+            if (k === 'sequence_number' && v !== '') { data[k] = parseInt(v, 10); return; }
+            if (v !== '') data[k] = v;
+        });
+        return data;
+    }
+
+    async function doPost(url, payload) {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify(payload),
+        });
+        return r.json();
+    }
+
+    // Create forms
+    ['requestRewriteCreateForm', 'responseRewriteCreateForm', 'bodyRewriteCreateForm', 'urlTranslationCreateForm'].forEach(id => {
+        const form = document.getElementById(id);
+        if (!form) return;
+        const typeMap = { requestRewriteCreateForm: 'request', responseRewriteCreateForm: 'response', bodyRewriteCreateForm: 'body', urlTranslationCreateForm: 'url_translation' };
+        const type = typeMap[id];
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const statusEl = form.querySelector('.field-status');
+            const data = serializeForm(form);
+            const url = buildUrl(form.dataset.accountId, form.dataset.appId, type, 'create');
+            const res = await doPost(url, data);
+            if (res.success) {
+                showStatus(statusEl, '{{ _("Rule created") }}', true);
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showStatus(statusEl, res.error || '{{ _("Error") }}', false);
+            }
+        });
+    });
+
+    // Edit forms
+    document.querySelectorAll('.rewrite-edit-form').forEach(form => {
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const statusEl = form.querySelector('.field-status');
+            const type = form.dataset.type;
+            const ruleName = form.dataset.ruleName;
+            const fields = serializeForm(form);
+            const url = buildUrl(form.dataset.accountId, form.dataset.appId, type, 'update');
+            const res = await doPost(url, { rule_name: ruleName, fields });
+            if (res.success) {
+                showStatus(statusEl, '{{ _("Saved") }}', true);
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showStatus(statusEl, res.error || '{{ _("Error") }}', false);
+            }
+        });
+    });
+
+    // Delete buttons
+    document.querySelectorAll('.btn-delete-rewrite').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const ruleName = btn.dataset.ruleName;
+            if (!confirm(`{{ _('Delete rule') }} "${ruleName}"?`)) return;
+            const type = btn.dataset.type;
+            const url = buildUrl(btn.dataset.accountId, btn.dataset.appId, type, 'delete');
+            const res = await doPost(url, { rule_name: ruleName });
+            if (res.success) {
+                location.reload();
+            } else {
+                alert(res.error || '{{ _("Delete failed") }}');
+            }
+        });
+    });
+
+    // Template picker buttons
+    document.querySelectorAll('.rewrite-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const target = btn.dataset.target;
+            const formMap = {
+                request: document.getElementById('requestRewriteCreateForm'),
+                response: document.getElementById('responseRewriteCreateForm'),
+                body: document.getElementById('bodyRewriteCreateForm'),
+                url_translation: document.getElementById('urlTranslationCreateForm'),
+            };
+            const form = formMap[target];
+            if (!form) return;
+
+            const set = (name, val) => { const el = form.querySelector(`[name="${name}"]`); if (el) el.value = val ?? ''; };
+
+            if (target === 'request') {
+                set('action', btn.dataset.action);
+                set('header', btn.dataset.header);
+                set('rewrite_value_type', btn.dataset.rewriteValueType);
+                set('rewrite_value', btn.dataset.rewriteValue);
+                set('condition', btn.dataset.condition);
+                const cp = form.querySelector('[name="continue_processing"]');
+                if (cp) cp.value = btn.dataset.continue === 'true' ? 'true' : 'false';
+            } else if (target === 'response') {
+                set('action', btn.dataset.action);
+                set('header', btn.dataset.header);
+                set('rewrite_value', btn.dataset.rewriteValue);
+                set('condition', btn.dataset.condition);
+            } else if (target === 'body') {
+                set('url', btn.dataset.url);
+                set('host', btn.dataset.host);
+                set('search_string', btn.dataset.searchString);
+                set('replace_string', btn.dataset.replaceString);
+            } else if (target === 'url_translation') {
+                set('inside_prefix', btn.dataset.insidePrefix);
+                set('outside_prefix', btn.dataset.outsidePrefix);
+                set('inside_domain', btn.dataset.insideDomain);
+                set('outside_domain', btn.dataset.outsideDomain);
+            }
+
+            form.querySelector('[name="name"]')?.focus();
+        });
+    });
+
+    // Macro reference links
+    document.querySelectorAll('.rw-more-macros-link').forEach(link => {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            new bootstrap.Modal(document.getElementById('macroReferenceModal')).show();
+        });
+    });
+})();
+</script>
+{% endblock %}

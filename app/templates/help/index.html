@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-question-circle"></i> {{ _('Help Center') }}</h2>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-key text-primary"></i> <a href="{{ url_for('help.accounts') }}">{{ _('Accounts') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('API key vs v2 credentials, verification, sharing accounts with team members.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-globe text-primary"></i> <a href="{{ url_for('help.applications') }}">{{ _('Applications') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('Viewing, creating, cloning, and editing server/endpoint configuration.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-shield-lock text-primary"></i> <a href="{{ url_for('help.security') }}">{{ _('Security') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('Protection modes, request limits, clickjacking and data theft protection.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-file-earmark-lock text-primary"></i> <a href="{{ url_for('help.certificates') }}">{{ _('Certificates') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('Upload formats (PEM/PFX), SNI certificates, and certificate management.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-journal-text text-primary"></i> <a href="{{ url_for('help.logs') }}">{{ _('Logs') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('WAF logs, access logs, false positive analysis, and filtering.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-file-earmark-code text-primary"></i> <a href="{{ url_for('help.templates') }}">{{ _('Templates') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('Creating, applying, bulk apply, import/export configuration templates.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-braces text-primary"></i> <a href="{{ url_for('help.raw_configs') }}">{{ _('Raw Configs') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('View and edit raw WaaS API payloads for full control over application settings.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-bar-chart-line text-primary"></i> <a href="{{ url_for('help.reports') }}">{{ _('Reports') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('Scheduled email reports for WAF summaries, access logs, and security overviews.') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5><i class="bi bi-collection text-primary"></i> <a href="{{ url_for('help.bulk_operations') }}">{{ _('Bulk Operations') }}</a></h5>
+                        <p class="text-muted mb-0">{{ _('Bulk security changes and template bulk apply across multiple applications.') }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-lightning"></i> {{ _('Quick Links') }}</h5></div>
+            <div class="list-group list-group-flush">
+                <a href="{{ url_for('accounts.add_account') }}" class="list-group-item list-group-item-action"><i class="bi bi-plus-circle"></i> {{ _('Add Account') }}</a>
+                <a href="{{ url_for('applications.list_applications') }}" class="list-group-item list-group-item-action"><i class="bi bi-globe"></i> {{ _('Browse Applications') }}</a>
+                <a href="{{ url_for('certificates.list_certificates') }}" class="list-group-item list-group-item-action"><i class="bi bi-file-earmark-lock"></i> {{ _('Manage Certificates') }}</a>
+                <a href="{{ url_for('logs.index') }}" class="list-group-item list-group-item-action"><i class="bi bi-journal-text"></i> {{ _('View Logs') }}</a>
+                <a href="{{ url_for('templates.list_templates') }}" class="list-group-item list-group-item-action"><i class="bi bi-file-earmark-code"></i> {{ _('Config Templates') }}</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

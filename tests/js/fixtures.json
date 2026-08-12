@@ -1,0 +1,2115 @@
+[
+  {
+    "name": "empty_config",
+    "description": "Empty JSON object has no matching sections",
+    "config": {},
+    "selections": null,
+    "expected_sections": [],
+    "expected_transform": null
+  },
+  {
+    "name": "unknown_keys",
+    "description": "Keys not in SECTION_DEFINITIONS are silently ignored",
+    "config": {
+      "totally_unknown_key": {
+        "foo": "bar"
+      },
+      "url_protection": {
+        "enabled": true
+      }
+    },
+    "selections": null,
+    "expected_sections": [
+      {
+        "key": "url_protection",
+        "label": "URL Protection",
+        "type": "simple",
+        "description": "Allowed HTTP methods, content types, CSRF protection, and URL-level injection detection.",
+        "always_strip_note": null,
+        "count": null
+      }
+    ],
+    "expected_transform": null
+  },
+  {
+    "name": "simple_section",
+    "description": "url_protection is a simple section (count=null, no items)",
+    "config": {
+      "url_protection": {
+        "enabled": true,
+        "max_url_length": 8192
+      }
+    },
+    "selections": {
+      "url_protection": {
+        "include": true
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "url_protection",
+        "label": "URL Protection",
+        "type": "simple",
+        "description": "Allowed HTTP methods, content types, CSRF protection, and URL-level injection detection.",
+        "always_strip_note": null,
+        "count": null
+      }
+    ],
+    "expected_transform": {
+      "url_protection": {
+        "enabled": true,
+        "max_url_length": 8192
+      }
+    }
+  },
+  {
+    "name": "simple_section_excluded",
+    "description": "include=false means section is omitted from transform output",
+    "config": {
+      "url_protection": {
+        "enabled": true
+      },
+      "request_limits": {
+        "max_url_length": 8192
+      }
+    },
+    "selections": {
+      "url_protection": {
+        "include": false
+      },
+      "request_limits": {
+        "include": true
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "request_limits",
+        "label": "Request Limits",
+        "type": "simple",
+        "description": "Maximum lengths for URL, query string, headers, cookies, and total request body.",
+        "always_strip_note": null,
+        "count": null
+      },
+      {
+        "key": "url_protection",
+        "label": "URL Protection",
+        "type": "simple",
+        "description": "Allowed HTTP methods, content types, CSRF protection, and URL-level injection detection.",
+        "always_strip_note": null,
+        "count": null
+      }
+    ],
+    "expected_transform": {
+      "request_limits": {
+        "max_url_length": 8192
+      }
+    }
+  },
+  {
+    "name": "servers_all",
+    "description": "Named list: all servers selected (items=null), runtime fields stripped",
+    "config": {
+      "servers": [
+        {
+          "name": "backend-primary",
+          "host": "10.0.0.10",
+          "port": 8080,
+          "health": "up",
+          "mode": "active",
+          "backend_test_result": "ok",
+          "viewed_backend_result": true,
+          "last_test_time": 1700000000,
+          "testing_backend_connectivity": false,
+          "ssl_to_backend": false
+        },
+        {
+          "name": "backend-secondary",
+          "host": "10.0.0.11",
+          "port": 8080,
+          "health": "down",
+          "mode": "standby",
+          "ssl_to_backend": true
+        }
+      ]
+    },
+    "selections": {
+      "servers": {
+        "include": true,
+        "items": null
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "servers",
+        "label": "Servers",
+        "type": "named_list",
+        "description": "Backend server host/port, SSL to backend, health check config, and connection pool settings.",
+        "always_strip_note": "Runtime fields (health, mode, backend_test_result, last_test_time) always stripped.",
+        "count": 2,
+        "items": [
+          {
+            "id": "backend-primary",
+            "label": "backend-primary"
+          },
+          {
+            "id": "backend-secondary",
+            "label": "backend-secondary"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "servers": [
+        {
+          "name": "backend-primary",
+          "host": "10.0.0.10",
+          "port": 8080,
+          "ssl_to_backend": false
+        },
+        {
+          "name": "backend-secondary",
+          "host": "10.0.0.11",
+          "port": 8080,
+          "ssl_to_backend": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "servers_filtered",
+    "description": "Named list: only selected server names included in transform output",
+    "config": {
+      "servers": [
+        {
+          "name": "backend-primary",
+          "host": "10.0.0.10",
+          "port": 8080,
+          "health": "up",
+          "mode": "active",
+          "backend_test_result": "ok",
+          "viewed_backend_result": true,
+          "last_test_time": 1700000000,
+          "testing_backend_connectivity": false,
+          "ssl_to_backend": false
+        },
+        {
+          "name": "backend-secondary",
+          "host": "10.0.0.11",
+          "port": 8080,
+          "health": "down",
+          "mode": "standby",
+          "ssl_to_backend": true
+        }
+      ]
+    },
+    "selections": {
+      "servers": {
+        "include": true,
+        "items": [
+          "backend-primary"
+        ]
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "servers",
+        "label": "Servers",
+        "type": "named_list",
+        "description": "Backend server host/port, SSL to backend, health check config, and connection pool settings.",
+        "always_strip_note": "Runtime fields (health, mode, backend_test_result, last_test_time) always stripped.",
+        "count": 2,
+        "items": [
+          {
+            "id": "backend-primary",
+            "label": "backend-primary"
+          },
+          {
+            "id": "backend-secondary",
+            "label": "backend-secondary"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "servers": [
+        {
+          "name": "backend-primary",
+          "host": "10.0.0.10",
+          "port": 8080,
+          "ssl_to_backend": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "allowed_ips_all",
+    "description": "IP list: all IPs, label joins ip+note with em dash",
+    "config": {
+      "allowed_ips": [
+        {
+          "ip": "192.168.1.0/24",
+          "note": "Corporate LAN"
+        },
+        {
+          "ip": "10.0.0.0/8",
+          "note": "Internal VPN"
+        },
+        {
+          "ip": "203.0.113.5",
+          "note": ""
+        }
+      ]
+    },
+    "selections": {
+      "allowed_ips": {
+        "include": true,
+        "items": null
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "allowed_ips",
+        "label": "Allowed IPs",
+        "type": "ip_list",
+        "description": "Client IP/CIDR entries that bypass WAF inspection.",
+        "always_strip_note": null,
+        "count": 3,
+        "items": [
+          {
+            "id": "192.168.1.0/24",
+            "label": "192.168.1.0/24 \u2014 Corporate LAN"
+          },
+          {
+            "id": "10.0.0.0/8",
+            "label": "10.0.0.0/8 \u2014 Internal VPN"
+          },
+          {
+            "id": "203.0.113.5",
+            "label": "203.0.113.5"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "allowed_ips": [
+        {
+          "ip": "192.168.1.0/24",
+          "note": "Corporate LAN"
+        },
+        {
+          "ip": "10.0.0.0/8",
+          "note": "Internal VPN"
+        },
+        {
+          "ip": "203.0.113.5",
+          "note": ""
+        }
+      ]
+    }
+  },
+  {
+    "name": "allowed_ips_filtered",
+    "description": "IP list: only selected IPs in transform output",
+    "config": {
+      "allowed_ips": [
+        {
+          "ip": "192.168.1.0/24",
+          "note": "Corporate LAN"
+        },
+        {
+          "ip": "10.0.0.0/8",
+          "note": "Internal VPN"
+        },
+        {
+          "ip": "203.0.113.5",
+          "note": ""
+        }
+      ]
+    },
+    "selections": {
+      "allowed_ips": {
+        "include": true,
+        "items": [
+          "10.0.0.0/8",
+          "203.0.113.5"
+        ]
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "allowed_ips",
+        "label": "Allowed IPs",
+        "type": "ip_list",
+        "description": "Client IP/CIDR entries that bypass WAF inspection.",
+        "always_strip_note": null,
+        "count": 3,
+        "items": [
+          {
+            "id": "192.168.1.0/24",
+            "label": "192.168.1.0/24 \u2014 Corporate LAN"
+          },
+          {
+            "id": "10.0.0.0/8",
+            "label": "10.0.0.0/8 \u2014 Internal VPN"
+          },
+          {
+            "id": "203.0.113.5",
+            "label": "203.0.113.5"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "allowed_ips": [
+        {
+          "ip": "10.0.0.0/8",
+          "note": "Internal VPN"
+        },
+        {
+          "ip": "203.0.113.5",
+          "note": ""
+        }
+      ]
+    }
+  },
+  {
+    "name": "client_eval_all",
+    "description": "Subsection: all rules, non-list fields (captcha_type) preserved",
+    "config": {
+      "client_evaluation": {
+        "captcha_type": "reCAPTCHA",
+        "client_risk_score": true,
+        "rules": [
+          {
+            "name": "block-bots",
+            "threshold": 80,
+            "action": "block"
+          },
+          {
+            "name": "captcha-mid",
+            "threshold": 50,
+            "action": "captcha"
+          },
+          {
+            "name": "allow-clean",
+            "threshold": 20,
+            "action": "allow"
+          }
+        ]
+      }
+    },
+    "selections": {
+      "client_evaluation": {
+        "include": true,
+        "items": null
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "client_evaluation",
+        "label": "Client Evaluation (CAPTCHA)",
+        "type": "subsection",
+        "description": "CAPTCHA type, client risk scoring rules, and mouse-event detection.",
+        "always_strip_note": null,
+        "count": 3,
+        "list_field": "rules",
+        "items": [
+          {
+            "id": "block-bots",
+            "label": "block-bots"
+          },
+          {
+            "id": "captcha-mid",
+            "label": "captcha-mid"
+          },
+          {
+            "id": "allow-clean",
+            "label": "allow-clean"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "client_evaluation": {
+        "captcha_type": "reCAPTCHA",
+        "client_risk_score": true,
+        "rules": [
+          {
+            "name": "block-bots",
+            "threshold": 80,
+            "action": "block"
+          },
+          {
+            "name": "captcha-mid",
+            "threshold": 50,
+            "action": "captcha"
+          },
+          {
+            "name": "allow-clean",
+            "threshold": 20,
+            "action": "allow"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "client_eval_filtered",
+    "description": "Subsection: filtered rules, captcha_type still present",
+    "config": {
+      "client_evaluation": {
+        "captcha_type": "reCAPTCHA",
+        "client_risk_score": true,
+        "rules": [
+          {
+            "name": "block-bots",
+            "threshold": 80,
+            "action": "block"
+          },
+          {
+            "name": "captcha-mid",
+            "threshold": 50,
+            "action": "captcha"
+          },
+          {
+            "name": "allow-clean",
+            "threshold": 20,
+            "action": "allow"
+          }
+        ]
+      }
+    },
+    "selections": {
+      "client_evaluation": {
+        "include": true,
+        "items": [
+          "block-bots",
+          "allow-clean"
+        ]
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "client_evaluation",
+        "label": "Client Evaluation (CAPTCHA)",
+        "type": "subsection",
+        "description": "CAPTCHA type, client risk scoring rules, and mouse-event detection.",
+        "always_strip_note": null,
+        "count": 3,
+        "list_field": "rules",
+        "items": [
+          {
+            "id": "block-bots",
+            "label": "block-bots"
+          },
+          {
+            "id": "captcha-mid",
+            "label": "captcha-mid"
+          },
+          {
+            "id": "allow-clean",
+            "label": "allow-clean"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "client_evaluation": {
+        "captcha_type": "reCAPTCHA",
+        "client_risk_score": true,
+        "rules": [
+          {
+            "name": "block-bots",
+            "threshold": 80,
+            "action": "block"
+          },
+          {
+            "name": "allow-clean",
+            "threshold": 20,
+            "action": "allow"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "ip_reputation_labels",
+    "description": "Subsection with label_fields: items use ip+comment join",
+    "config": {
+      "ip_reputation": {
+        "geo_blocking": true,
+        "exceptions": [
+          {
+            "ip": "1.2.3.4",
+            "comment": "Partner IP"
+          },
+          {
+            "ip": "5.6.7.8",
+            "comment": ""
+          }
+        ]
+      }
+    },
+    "selections": null,
+    "expected_sections": [
+      {
+        "key": "ip_reputation",
+        "label": "IP Reputation",
+        "type": "subsection",
+        "description": "GeoIP blocking, threat-intelligence categories, and per-IP allow exceptions.",
+        "always_strip_note": null,
+        "count": 2,
+        "list_field": "exceptions",
+        "items": [
+          {
+            "id": "1.2.3.4",
+            "label": "1.2.3.4 \u2014 Partner IP"
+          },
+          {
+            "id": "5.6.7.8",
+            "label": "5.6.7.8"
+          }
+        ]
+      }
+    ],
+    "expected_transform": null
+  },
+  {
+    "name": "endpoints_present_flags",
+    "description": "Endpoints: present=True for populated sub-sections, sni_certificates=False when empty",
+    "config": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "ca_name": "Let's Encrypt (Barracuda Managed)",
+            "waf_container_exposed_port": 32768,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80,
+            "ca_name": null,
+            "waf_container_exposed_port": 32769
+          }
+        ],
+        "certificate": {
+          "ssl_certificate": "CERT_PEM_DATA",
+          "encrypted_ssl_private_key": "ENC_KEY_DATA",
+          "aes_key_encrypted": "AES_ENC",
+          "aes_key_customer_container": "AES_CC",
+          "ssl_private_key_customer_container": "PK_CC",
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ],
+        "sni_certificates": [],
+        "cname": "app123.waas.example.com"
+      }
+    },
+    "selections": null,
+    "expected_sections": [
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "endpoints",
+        "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+        "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+        "sub_sections": [
+          {
+            "key": "https",
+            "label": "TLS Version Settings",
+            "caution": false,
+            "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "advanced",
+            "label": "Advanced WAF / Session Settings",
+            "caution": false,
+            "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "ports",
+            "label": "Port Definitions",
+            "caution": false,
+            "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "certificate",
+            "label": "Certificate Management Flags",
+            "caution": true,
+            "note": null,
+            "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped.",
+            "present": true
+          },
+          {
+            "key": "deployment",
+            "label": "Region / Deployment Settings",
+            "caution": true,
+            "note": null,
+            "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target.",
+            "present": true
+          },
+          {
+            "key": "domains",
+            "label": "Domain List",
+            "caution": true,
+            "note": null,
+            "warning": "Source app domains \u2014 almost certainly wrong for a different target app.",
+            "present": true
+          },
+          {
+            "key": "sni_certificates",
+            "label": "SNI Certificates",
+            "caution": true,
+            "note": null,
+            "warning": "May contain certificate material encrypted for the source account.",
+            "present": false
+          }
+        ]
+      }
+    ],
+    "expected_transform": null
+  },
+  {
+    "name": "endpoints_https_advanced_only",
+    "description": "Endpoints transform: only https and advanced sub-sections selected",
+    "config": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "ca_name": "Let's Encrypt (Barracuda Managed)",
+            "waf_container_exposed_port": 32768,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80,
+            "ca_name": null,
+            "waf_container_exposed_port": 32769
+          }
+        ],
+        "certificate": {
+          "ssl_certificate": "CERT_PEM_DATA",
+          "encrypted_ssl_private_key": "ENC_KEY_DATA",
+          "aes_key_encrypted": "AES_ENC",
+          "aes_key_customer_container": "AES_CC",
+          "ssl_private_key_customer_container": "PK_CC",
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ],
+        "sni_certificates": [],
+        "cname": "app123.waas.example.com"
+      }
+    },
+    "selections": {
+      "endpoints": {
+        "include": true,
+        "sub": {
+          "https": true,
+          "advanced": true,
+          "ports": false,
+          "certificate": false,
+          "deployment": false,
+          "domains": false,
+          "sni_certificates": false
+        }
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "endpoints",
+        "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+        "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+        "sub_sections": [
+          {
+            "key": "https",
+            "label": "TLS Version Settings",
+            "caution": false,
+            "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "advanced",
+            "label": "Advanced WAF / Session Settings",
+            "caution": false,
+            "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "ports",
+            "label": "Port Definitions",
+            "caution": false,
+            "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "certificate",
+            "label": "Certificate Management Flags",
+            "caution": true,
+            "note": null,
+            "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped.",
+            "present": true
+          },
+          {
+            "key": "deployment",
+            "label": "Region / Deployment Settings",
+            "caution": true,
+            "note": null,
+            "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target.",
+            "present": true
+          },
+          {
+            "key": "domains",
+            "label": "Domain List",
+            "caution": true,
+            "note": null,
+            "warning": "Source app domains \u2014 almost certainly wrong for a different target app.",
+            "present": true
+          },
+          {
+            "key": "sni_certificates",
+            "label": "SNI Certificates",
+            "caution": true,
+            "note": null,
+            "warning": "May contain certificate material encrypted for the source account.",
+            "present": false
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        }
+      }
+    }
+  },
+  {
+    "name": "endpoints_cert_strip",
+    "description": "Endpoints transform: certificate sub-section strips encrypted key material",
+    "config": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "ca_name": "Let's Encrypt (Barracuda Managed)",
+            "waf_container_exposed_port": 32768,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80,
+            "ca_name": null,
+            "waf_container_exposed_port": 32769
+          }
+        ],
+        "certificate": {
+          "ssl_certificate": "CERT_PEM_DATA",
+          "encrypted_ssl_private_key": "ENC_KEY_DATA",
+          "aes_key_encrypted": "AES_ENC",
+          "aes_key_customer_container": "AES_CC",
+          "ssl_private_key_customer_container": "PK_CC",
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ],
+        "sni_certificates": [],
+        "cname": "app123.waas.example.com"
+      }
+    },
+    "selections": {
+      "endpoints": {
+        "include": true,
+        "sub": {
+          "https": false,
+          "advanced": false,
+          "ports": false,
+          "certificate": true,
+          "deployment": false,
+          "domains": false,
+          "sni_certificates": false
+        }
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "endpoints",
+        "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+        "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+        "sub_sections": [
+          {
+            "key": "https",
+            "label": "TLS Version Settings",
+            "caution": false,
+            "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "advanced",
+            "label": "Advanced WAF / Session Settings",
+            "caution": false,
+            "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "ports",
+            "label": "Port Definitions",
+            "caution": false,
+            "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "certificate",
+            "label": "Certificate Management Flags",
+            "caution": true,
+            "note": null,
+            "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped.",
+            "present": true
+          },
+          {
+            "key": "deployment",
+            "label": "Region / Deployment Settings",
+            "caution": true,
+            "note": null,
+            "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target.",
+            "present": true
+          },
+          {
+            "key": "domains",
+            "label": "Domain List",
+            "caution": true,
+            "note": null,
+            "warning": "Source app domains \u2014 almost certainly wrong for a different target app.",
+            "present": true
+          },
+          {
+            "key": "sni_certificates",
+            "label": "SNI Certificates",
+            "caution": true,
+            "note": null,
+            "warning": "May contain certificate material encrypted for the source account.",
+            "present": false
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "endpoints": {
+        "certificate": {
+          "use_automatic": true,
+          "enable_container_secret": false
+        }
+      }
+    }
+  },
+  {
+    "name": "endpoints_port_strip",
+    "description": "Endpoints transform: ports sub-section strips ca_name and container port",
+    "config": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "ca_name": "Let's Encrypt (Barracuda Managed)",
+            "waf_container_exposed_port": 32768,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80,
+            "ca_name": null,
+            "waf_container_exposed_port": 32769
+          }
+        ],
+        "certificate": {
+          "ssl_certificate": "CERT_PEM_DATA",
+          "encrypted_ssl_private_key": "ENC_KEY_DATA",
+          "aes_key_encrypted": "AES_ENC",
+          "aes_key_customer_container": "AES_CC",
+          "ssl_private_key_customer_container": "PK_CC",
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ],
+        "sni_certificates": [],
+        "cname": "app123.waas.example.com"
+      }
+    },
+    "selections": {
+      "endpoints": {
+        "include": true,
+        "sub": {
+          "https": false,
+          "advanced": false,
+          "ports": true,
+          "certificate": false,
+          "deployment": false,
+          "domains": false,
+          "sni_certificates": false
+        }
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "endpoints",
+        "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+        "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+        "sub_sections": [
+          {
+            "key": "https",
+            "label": "TLS Version Settings",
+            "caution": false,
+            "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "advanced",
+            "label": "Advanced WAF / Session Settings",
+            "caution": false,
+            "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "ports",
+            "label": "Port Definitions",
+            "caution": false,
+            "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "certificate",
+            "label": "Certificate Management Flags",
+            "caution": true,
+            "note": null,
+            "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped.",
+            "present": true
+          },
+          {
+            "key": "deployment",
+            "label": "Region / Deployment Settings",
+            "caution": true,
+            "note": null,
+            "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target.",
+            "present": true
+          },
+          {
+            "key": "domains",
+            "label": "Domain List",
+            "caution": true,
+            "note": null,
+            "warning": "Source app domains \u2014 almost certainly wrong for a different target app.",
+            "present": true
+          },
+          {
+            "key": "sni_certificates",
+            "label": "SNI Certificates",
+            "caution": true,
+            "note": null,
+            "warning": "May contain certificate material encrypted for the source account.",
+            "present": false
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "endpoints": {
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "endpoints_sni_empty",
+    "description": "sni_certificates present=False when list is empty",
+    "config": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "ca_name": "Let's Encrypt (Barracuda Managed)",
+            "waf_container_exposed_port": 32768,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80,
+            "ca_name": null,
+            "waf_container_exposed_port": 32769
+          }
+        ],
+        "certificate": {
+          "ssl_certificate": "CERT_PEM_DATA",
+          "encrypted_ssl_private_key": "ENC_KEY_DATA",
+          "aes_key_encrypted": "AES_ENC",
+          "aes_key_customer_container": "AES_CC",
+          "ssl_private_key_customer_container": "PK_CC",
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ],
+        "sni_certificates": [],
+        "cname": "app123.waas.example.com"
+      }
+    },
+    "selections": null,
+    "expected_sections": [
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "endpoints",
+        "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+        "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+        "sub_sections": [
+          {
+            "key": "https",
+            "label": "TLS Version Settings",
+            "caution": false,
+            "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "advanced",
+            "label": "Advanced WAF / Session Settings",
+            "caution": false,
+            "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "ports",
+            "label": "Port Definitions",
+            "caution": false,
+            "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "certificate",
+            "label": "Certificate Management Flags",
+            "caution": true,
+            "note": null,
+            "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped.",
+            "present": true
+          },
+          {
+            "key": "deployment",
+            "label": "Region / Deployment Settings",
+            "caution": true,
+            "note": null,
+            "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target.",
+            "present": true
+          },
+          {
+            "key": "domains",
+            "label": "Domain List",
+            "caution": true,
+            "note": null,
+            "warning": "Source app domains \u2014 almost certainly wrong for a different target app.",
+            "present": true
+          },
+          {
+            "key": "sni_certificates",
+            "label": "SNI Certificates",
+            "caution": true,
+            "note": null,
+            "warning": "May contain certificate material encrypted for the source account.",
+            "present": false
+          }
+        ]
+      }
+    ],
+    "expected_transform": null
+  },
+  {
+    "name": "endpoints_sni_populated",
+    "description": "sni_certificates present=True when list has items",
+    "config": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "ca_name": "Let's Encrypt (Barracuda Managed)",
+            "waf_container_exposed_port": 32768,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80,
+            "ca_name": null,
+            "waf_container_exposed_port": 32769
+          }
+        ],
+        "certificate": {
+          "ssl_certificate": "CERT_PEM_DATA",
+          "encrypted_ssl_private_key": "ENC_KEY_DATA",
+          "aes_key_encrypted": "AES_ENC",
+          "aes_key_customer_container": "AES_CC",
+          "ssl_private_key_customer_container": "PK_CC",
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ],
+        "sni_certificates": [
+          {
+            "domain": "alt.example.com"
+          }
+        ],
+        "cname": "app123.waas.example.com"
+      }
+    },
+    "selections": null,
+    "expected_sections": [
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "endpoints",
+        "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+        "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+        "sub_sections": [
+          {
+            "key": "https",
+            "label": "TLS Version Settings",
+            "caution": false,
+            "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "advanced",
+            "label": "Advanced WAF / Session Settings",
+            "caution": false,
+            "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "ports",
+            "label": "Port Definitions",
+            "caution": false,
+            "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "certificate",
+            "label": "Certificate Management Flags",
+            "caution": true,
+            "note": null,
+            "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped.",
+            "present": true
+          },
+          {
+            "key": "deployment",
+            "label": "Region / Deployment Settings",
+            "caution": true,
+            "note": null,
+            "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target.",
+            "present": true
+          },
+          {
+            "key": "domains",
+            "label": "Domain List",
+            "caution": true,
+            "note": null,
+            "warning": "Source app domains \u2014 almost certainly wrong for a different target app.",
+            "present": true
+          },
+          {
+            "key": "sni_certificates",
+            "label": "SNI Certificates",
+            "caution": true,
+            "note": null,
+            "warning": "May contain certificate material encrypted for the source account.",
+            "present": true
+          }
+        ]
+      }
+    ],
+    "expected_transform": null
+  },
+  {
+    "name": "response_pages_labels",
+    "description": "Response pages: label joins name+type, filtered to one page",
+    "config": {
+      "response_page_component": {
+        "pages": [
+          {
+            "name": "default-block",
+            "type": "block",
+            "body": "<html>Blocked</html>"
+          },
+          {
+            "name": "captcha-page",
+            "type": "captcha",
+            "body": "<html>CAPTCHA</html>"
+          },
+          {
+            "name": "error-page",
+            "type": "error",
+            "body": "<html>Error</html>"
+          }
+        ]
+      }
+    },
+    "selections": {
+      "response_page_component": {
+        "include": true,
+        "items": [
+          "captcha-page"
+        ]
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "response_page_component",
+        "label": "Response Pages",
+        "type": "subsection",
+        "description": "Custom HTML pages for blocked requests, CAPTCHA, login flows, and error responses.",
+        "always_strip_note": null,
+        "count": 3,
+        "list_field": "pages",
+        "items": [
+          {
+            "id": "default-block",
+            "label": "default-block \u2014 block"
+          },
+          {
+            "id": "captcha-page",
+            "label": "captcha-page \u2014 captcha"
+          },
+          {
+            "id": "error-page",
+            "label": "error-page \u2014 error"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "response_page_component": {
+        "pages": [
+          {
+            "name": "captcha-page",
+            "type": "captcha",
+            "body": "<html>CAPTCHA</html>"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "full_config_all_selected",
+    "description": "Full config with all sections selected \u2014 integration cross-validation",
+    "config": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "ca_name": "Let's Encrypt (Barracuda Managed)",
+            "waf_container_exposed_port": 32768,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80,
+            "ca_name": null,
+            "waf_container_exposed_port": 32769
+          }
+        ],
+        "certificate": {
+          "ssl_certificate": "CERT_PEM_DATA",
+          "encrypted_ssl_private_key": "ENC_KEY_DATA",
+          "aes_key_encrypted": "AES_ENC",
+          "aes_key_customer_container": "AES_CC",
+          "ssl_private_key_customer_container": "PK_CC",
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ],
+        "sni_certificates": [],
+        "cname": "app123.waas.example.com"
+      },
+      "servers": [
+        {
+          "name": "backend-primary",
+          "host": "10.0.0.10",
+          "port": 8080,
+          "health": "up",
+          "mode": "active",
+          "backend_test_result": "ok",
+          "viewed_backend_result": true,
+          "last_test_time": 1700000000,
+          "testing_backend_connectivity": false,
+          "ssl_to_backend": false
+        },
+        {
+          "name": "backend-secondary",
+          "host": "10.0.0.11",
+          "port": 8080,
+          "health": "down",
+          "mode": "standby",
+          "ssl_to_backend": true
+        }
+      ],
+      "allowed_ips": [
+        {
+          "ip": "192.168.1.0/24",
+          "note": "Corporate LAN"
+        },
+        {
+          "ip": "10.0.0.0/8",
+          "note": "Internal VPN"
+        },
+        {
+          "ip": "203.0.113.5",
+          "note": ""
+        }
+      ],
+      "blocked_bots": {
+        "search_engines": false,
+        "scanners": true,
+        "scrapers": true
+      },
+      "client_evaluation": {
+        "captcha_type": "reCAPTCHA",
+        "client_risk_score": true,
+        "rules": [
+          {
+            "name": "block-bots",
+            "threshold": 80,
+            "action": "block"
+          },
+          {
+            "name": "captcha-mid",
+            "threshold": 50,
+            "action": "captcha"
+          },
+          {
+            "name": "allow-clean",
+            "threshold": 20,
+            "action": "allow"
+          }
+        ]
+      },
+      "ip_reputation": {
+        "geo_blocking": true,
+        "exceptions": [
+          {
+            "ip": "1.2.3.4",
+            "comment": "Partner IP"
+          },
+          {
+            "ip": "5.6.7.8",
+            "comment": ""
+          }
+        ]
+      },
+      "request_limits": {
+        "max_url_length": 8192,
+        "max_query_string_length": 4096
+      },
+      "response_cloaking": {
+        "status_code_normalization": true
+      },
+      "response_page_component": {
+        "pages": [
+          {
+            "name": "default-block",
+            "type": "block",
+            "body": "<html>Blocked</html>"
+          },
+          {
+            "name": "captcha-page",
+            "type": "captcha",
+            "body": "<html>CAPTCHA</html>"
+          },
+          {
+            "name": "error-page",
+            "type": "error",
+            "body": "<html>Error</html>"
+          }
+        ]
+      },
+      "slow_client_prevention": {
+        "min_data_rate": 100
+      },
+      "url_protection": {
+        "max_url_length": 2048,
+        "enabled": true
+      },
+      "violation_responses": {
+        "policies": [
+          {
+            "name": "high-risk",
+            "threshold": 90,
+            "action": "block"
+          },
+          {
+            "name": "medium-risk",
+            "threshold": 60,
+            "action": "tarpit"
+          }
+        ]
+      }
+    },
+    "selections": {
+      "endpoints": {
+        "include": true,
+        "sub": {
+          "https": true,
+          "advanced": true,
+          "ports": true,
+          "certificate": true,
+          "deployment": true,
+          "domains": true,
+          "sni_certificates": true
+        }
+      },
+      "servers": {
+        "include": true,
+        "items": null
+      },
+      "allowed_ips": {
+        "include": true,
+        "items": null
+      },
+      "blocked_bots": {
+        "include": true
+      },
+      "client_evaluation": {
+        "include": true,
+        "items": null
+      },
+      "ip_reputation": {
+        "include": true,
+        "items": null
+      },
+      "request_limits": {
+        "include": true
+      },
+      "response_cloaking": {
+        "include": true
+      },
+      "response_page_component": {
+        "include": true,
+        "items": null
+      },
+      "slow_client_prevention": {
+        "include": true
+      },
+      "url_protection": {
+        "include": true
+      },
+      "violation_responses": {
+        "include": true,
+        "items": null
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "endpoints",
+        "label": "Endpoints",
+        "type": "endpoints",
+        "description": "Port configuration, TLS version policy, WAF toggles, and certificate assignment.",
+        "always_strip_note": "Certificate/key material (ssl_certificate, encrypted_ssl_private_key, AES keys) and the app CNAME are always removed. Per-port ca_name and waf_container_exposed_port are also always stripped.",
+        "sub_sections": [
+          {
+            "key": "https",
+            "label": "TLS Version Settings",
+            "caution": false,
+            "note": "TLS 1.0\u20131.3 enable flags, cipher suite, PFS \u2014 safe to import.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "advanced",
+            "label": "Advanced WAF / Session Settings",
+            "caution": false,
+            "note": "Session timeout, HTTP/2, WebSocket, fingerprinting, proxy-list toggles.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "ports",
+            "label": "Port Definitions",
+            "caution": false,
+            "note": "Port number, protocol, per-port advanced config. ca_name and container port stripped.",
+            "warning": null,
+            "present": true
+          },
+          {
+            "key": "certificate",
+            "label": "Certificate Management Flags",
+            "caution": true,
+            "note": null,
+            "warning": "Only use_automatic and enable_container_secret are included \u2014 all certificate/key material is always stripped.",
+            "present": true
+          },
+          {
+            "key": "deployment",
+            "label": "Region / Deployment Settings",
+            "caution": true,
+            "note": null,
+            "warning": "Primary/secondary region selection is account-level \u2014 may conflict with target.",
+            "present": true
+          },
+          {
+            "key": "domains",
+            "label": "Domain List",
+            "caution": true,
+            "note": null,
+            "warning": "Source app domains \u2014 almost certainly wrong for a different target app.",
+            "present": true
+          },
+          {
+            "key": "sni_certificates",
+            "label": "SNI Certificates",
+            "caution": true,
+            "note": null,
+            "warning": "May contain certificate material encrypted for the source account.",
+            "present": false
+          }
+        ]
+      },
+      {
+        "key": "servers",
+        "label": "Servers",
+        "type": "named_list",
+        "description": "Backend server host/port, SSL to backend, health check config, and connection pool settings.",
+        "always_strip_note": "Runtime fields (health, mode, backend_test_result, last_test_time) always stripped.",
+        "count": 2,
+        "items": [
+          {
+            "id": "backend-primary",
+            "label": "backend-primary"
+          },
+          {
+            "id": "backend-secondary",
+            "label": "backend-secondary"
+          }
+        ]
+      },
+      {
+        "key": "allowed_ips",
+        "label": "Allowed IPs",
+        "type": "ip_list",
+        "description": "Client IP/CIDR entries that bypass WAF inspection.",
+        "always_strip_note": null,
+        "count": 3,
+        "items": [
+          {
+            "id": "192.168.1.0/24",
+            "label": "192.168.1.0/24 \u2014 Corporate LAN"
+          },
+          {
+            "id": "10.0.0.0/8",
+            "label": "10.0.0.0/8 \u2014 Internal VPN"
+          },
+          {
+            "id": "203.0.113.5",
+            "label": "203.0.113.5"
+          }
+        ]
+      },
+      {
+        "key": "blocked_bots",
+        "label": "Bot Blocking",
+        "type": "simple",
+        "description": "Bot category blocking toggles (search engines, scrapers, scanners, GenAI, etc.).",
+        "always_strip_note": null,
+        "count": null
+      },
+      {
+        "key": "client_evaluation",
+        "label": "Client Evaluation (CAPTCHA)",
+        "type": "subsection",
+        "description": "CAPTCHA type, client risk scoring rules, and mouse-event detection.",
+        "always_strip_note": null,
+        "count": 3,
+        "list_field": "rules",
+        "items": [
+          {
+            "id": "block-bots",
+            "label": "block-bots"
+          },
+          {
+            "id": "captcha-mid",
+            "label": "captcha-mid"
+          },
+          {
+            "id": "allow-clean",
+            "label": "allow-clean"
+          }
+        ]
+      },
+      {
+        "key": "ip_reputation",
+        "label": "IP Reputation",
+        "type": "subsection",
+        "description": "GeoIP blocking, threat-intelligence categories, and per-IP allow exceptions.",
+        "always_strip_note": null,
+        "count": 2,
+        "list_field": "exceptions",
+        "items": [
+          {
+            "id": "1.2.3.4",
+            "label": "1.2.3.4 \u2014 Partner IP"
+          },
+          {
+            "id": "5.6.7.8",
+            "label": "5.6.7.8"
+          }
+        ]
+      },
+      {
+        "key": "request_limits",
+        "label": "Request Limits",
+        "type": "simple",
+        "description": "Maximum lengths for URL, query string, headers, cookies, and total request body.",
+        "always_strip_note": null,
+        "count": null
+      },
+      {
+        "key": "response_cloaking",
+        "label": "Response Cloaking",
+        "type": "simple",
+        "description": "Status code normalisation and sensitive response header suppression.",
+        "always_strip_note": null,
+        "count": null
+      },
+      {
+        "key": "response_page_component",
+        "label": "Response Pages",
+        "type": "subsection",
+        "description": "Custom HTML pages for blocked requests, CAPTCHA, login flows, and error responses.",
+        "always_strip_note": null,
+        "count": 3,
+        "list_field": "pages",
+        "items": [
+          {
+            "id": "default-block",
+            "label": "default-block \u2014 block"
+          },
+          {
+            "id": "captcha-page",
+            "label": "captcha-page \u2014 captcha"
+          },
+          {
+            "id": "error-page",
+            "label": "error-page \u2014 error"
+          }
+        ]
+      },
+      {
+        "key": "slow_client_prevention",
+        "label": "Slow Client Prevention",
+        "type": "simple",
+        "description": "Timeouts and minimum data-rate thresholds for slow HTTP attack mitigation.",
+        "always_strip_note": null,
+        "count": null
+      },
+      {
+        "key": "url_protection",
+        "label": "URL Protection",
+        "type": "simple",
+        "description": "Allowed HTTP methods, content types, CSRF protection, and URL-level injection detection.",
+        "always_strip_note": null,
+        "count": null
+      },
+      {
+        "key": "violation_responses",
+        "label": "Violation Responses",
+        "type": "subsection",
+        "description": "Actions (block, tarpit, redirect) triggered when WAF violation risk scores exceed thresholds.",
+        "always_strip_note": null,
+        "count": 2,
+        "list_field": "policies",
+        "items": [
+          {
+            "id": "high-risk",
+            "label": "high-risk"
+          },
+          {
+            "id": "medium-risk",
+            "label": "medium-risk"
+          }
+        ]
+      }
+    ],
+    "expected_transform": {
+      "endpoints": {
+        "https": {
+          "tls_10": false,
+          "tls_11": false,
+          "tls_12": true,
+          "tls_13": true
+        },
+        "advanced": {
+          "session_timeout": 60,
+          "enable_http2": true
+        },
+        "ports": [
+          {
+            "protocol": "HTTPS",
+            "port": 443,
+            "advanced_configuration": {
+              "session_timeout": 60
+            }
+          },
+          {
+            "protocol": "HTTP",
+            "port": 80
+          }
+        ],
+        "certificate": {
+          "use_automatic": true,
+          "enable_container_secret": false
+        },
+        "deployment": {
+          "primary_region": "westus",
+          "secondary_region": "eastus"
+        },
+        "domains": [
+          "www.example.com",
+          "api.example.com"
+        ]
+      },
+      "servers": [
+        {
+          "name": "backend-primary",
+          "host": "10.0.0.10",
+          "port": 8080,
+          "ssl_to_backend": false
+        },
+        {
+          "name": "backend-secondary",
+          "host": "10.0.0.11",
+          "port": 8080,
+          "ssl_to_backend": true
+        }
+      ],
+      "allowed_ips": [
+        {
+          "ip": "192.168.1.0/24",
+          "note": "Corporate LAN"
+        },
+        {
+          "ip": "10.0.0.0/8",
+          "note": "Internal VPN"
+        },
+        {
+          "ip": "203.0.113.5",
+          "note": ""
+        }
+      ],
+      "blocked_bots": {
+        "search_engines": false,
+        "scanners": true,
+        "scrapers": true
+      },
+      "client_evaluation": {
+        "captcha_type": "reCAPTCHA",
+        "client_risk_score": true,
+        "rules": [
+          {
+            "name": "block-bots",
+            "threshold": 80,
+            "action": "block"
+          },
+          {
+            "name": "captcha-mid",
+            "threshold": 50,
+            "action": "captcha"
+          },
+          {
+            "name": "allow-clean",
+            "threshold": 20,
+            "action": "allow"
+          }
+        ]
+      },
+      "ip_reputation": {
+        "geo_blocking": true,
+        "exceptions": [
+          {
+            "ip": "1.2.3.4",
+            "comment": "Partner IP"
+          },
+          {
+            "ip": "5.6.7.8",
+            "comment": ""
+          }
+        ]
+      },
+      "request_limits": {
+        "max_url_length": 8192,
+        "max_query_string_length": 4096
+      },
+      "response_cloaking": {
+        "status_code_normalization": true
+      },
+      "response_page_component": {
+        "pages": [
+          {
+            "name": "default-block",
+            "type": "block",
+            "body": "<html>Blocked</html>"
+          },
+          {
+            "name": "captcha-page",
+            "type": "captcha",
+            "body": "<html>CAPTCHA</html>"
+          },
+          {
+            "name": "error-page",
+            "type": "error",
+            "body": "<html>Error</html>"
+          }
+        ]
+      },
+      "slow_client_prevention": {
+        "min_data_rate": 100
+      },
+      "url_protection": {
+        "max_url_length": 2048,
+        "enabled": true
+      },
+      "violation_responses": {
+        "policies": [
+          {
+            "name": "high-risk",
+            "threshold": 90,
+            "action": "block"
+          },
+          {
+            "name": "medium-risk",
+            "threshold": 60,
+            "action": "tarpit"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "all_excluded",
+    "description": "All sections excluded \u2192 transform returns empty object",
+    "config": {
+      "url_protection": {
+        "enabled": true
+      },
+      "request_limits": {
+        "max_url_length": 8192
+      }
+    },
+    "selections": {
+      "url_protection": {
+        "include": false
+      },
+      "request_limits": {
+        "include": false
+      }
+    },
+    "expected_sections": [
+      {
+        "key": "request_limits",
+        "label": "Request Limits",
+        "type": "simple",
+        "description": "Maximum lengths for URL, query string, headers, cookies, and total request body.",
+        "always_strip_note": null,
+        "count": null
+      },
+      {
+        "key": "url_protection",
+        "label": "URL Protection",
+        "type": "simple",
+        "description": "Allowed HTTP methods, content types, CSRF protection, and URL-level injection detection.",
+        "always_strip_note": null,
+        "count": null
+      }
+    ],
+    "expected_transform": {}
+  }
+]

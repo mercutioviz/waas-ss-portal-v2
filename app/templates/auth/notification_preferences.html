@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_submit %}
+{% block title %}{{ _('Notification Preferences') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Profile'), url_for('auth.profile')),
+    (_('Notification Preferences'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-bell"></i> {{ _('Notification Preferences') }}</h5></div>
+            <div class="card-body">
+                <form method="post">
+                    {{ form.hidden_tag() }}
+
+                    <h6 class="text-muted mb-2"><i class="bi bi-calendar-check"></i> {{ _('Reports') }}</h6>
+                    <p class="small text-muted mb-3">{{ _('Triggered when a scheduled report completes its run and is ready for review.') }}</p>
+                    <div class="form-check form-switch mb-2">
+                        {{ form.notify_report_email() }}
+                        <label class="form-check-label" for="notify_report_email">{{ _('Email notifications for report delivery') }}</label>
+                    </div>
+                    <div class="form-check form-switch mb-4">
+                        {{ form.notify_report_inapp() }}
+                        <label class="form-check-label" for="notify_report_inapp">{{ _('In-app notifications for report delivery') }}</label>
+                    </div>
+
+                    <h6 class="text-muted mb-2"><i class="bi bi-file-earmark-lock"></i> {{ _('Certificate Expiry') }}</h6>
+                    <p class="small text-muted mb-3">{{ _('Triggered 30, 14, and 7 days before an SSL certificate expires.') }}</p>
+                    <div class="form-check form-switch mb-2">
+                        {{ form.notify_cert_expiry_email() }}
+                        <label class="form-check-label" for="notify_cert_expiry_email">{{ _('Email notifications for expiring certificates') }}</label>
+                    </div>
+                    <div class="form-check form-switch mb-4">
+                        {{ form.notify_cert_expiry_inapp() }}
+                        <label class="form-check-label" for="notify_cert_expiry_inapp">{{ _('In-app notifications for expiring certificates') }}</label>
+                    </div>
+
+                    <h6 class="text-muted mb-2"><i class="bi bi-key"></i> {{ _('API Key Expiry') }}</h6>
+                    <p class="small text-muted mb-3">{{ _('Triggered 30, 14, and 7 days before a WaaS API key expiry date you set.') }}</p>
+                    <div class="form-check form-switch mb-2">
+                        {{ form.notify_apikey_expiry_email() }}
+                        <label class="form-check-label" for="notify_apikey_expiry_email">{{ _('Email notifications for expiring API keys') }}</label>
+                    </div>
+                    <div class="form-check form-switch mb-4">
+                        {{ form.notify_apikey_expiry_inapp() }}
+                        <label class="form-check-label" for="notify_apikey_expiry_inapp">{{ _('In-app notifications for expiring API keys') }}</label>
+                    </div>
+
+                    {{ render_submit(form, cancel_url=url_for('auth.profile'), cancel_label=_('Back to Profile')) }}
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

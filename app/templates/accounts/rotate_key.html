@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "macros/forms.html" import render_field, render_submit %}
+{% block title %}{{ _('Rotate API Key') }} — {{ account.account_name }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('accounts.list_accounts') }}">{{ _('Accounts') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('accounts.view_account', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Rotate API Key') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-arrow-repeat"></i> {{ _('Rotate API Key') }}</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <span class="text-muted">{{ _('Account:') }}</span> <strong>{{ account.account_name }}</strong>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-muted">{{ _('Current API Key Status:') }}</span>
+                    {% if account.has_api_key %}
+                    <span class="badge bg-success"><i class="bi bi-check-circle"></i> {{ _('Configured') }}</span>
+                    {% else %}
+                    <span class="badge bg-secondary">{{ _('Not set') }}</span>
+                    {% endif %}
+                </div>
+
+                <hr>
+
+                <form method="POST" data-loading="{{ _('Rotating API key...') }}">
+                    {{ form.hidden_tag() }}
+                    {{ render_field(form.new_api_key, help=_('Paste the new API key from your WaaS account settings.')) }}
+                    {{ render_field(form.api_key_expiry, help=_('Optional. Set a reminder date for when this new API key expires.')) }}
+                    {{ render_field(form.verify_key, help=_('If checked, the new key will be tested with a lightweight API call before saving.')) }}
+                    {{ render_submit(form, cancel_url=url_for('accounts.view_account', account_id=account.id)) }}
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,404 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Response Pages') }} — {{ app_id }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications') }}">{{ _('Applications') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}">{{ app_id }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Response Pages') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <h2><i class="bi bi-file-earmark-code"></i> {{ _('Response Pages') }} <small class="text-muted fs-6">{{ app_id }}</small></h2>
+    <div class="d-flex gap-2">
+        {% if user_can_write %}
+        <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addPageModal">
+            <i class="bi bi-plus-circle"></i> {{ _('Add Page') }}
+        </button>
+        {% endif %}
+        <a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}" class="btn btn-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> {{ _('Back to Application') }}
+        </a>
+    </div>
+</div>
+
+<p class="text-muted mb-4">
+    {{ _('Custom response pages are shown to visitors when the WAF blocks a request, presents a CAPTCHA challenge, or triggers another security action. Paste your HTML directly — no JSON conversion required.') }}
+</p>
+
+{# Macro quick-reference badge bar #}
+<div class="mb-4">
+    <span class="text-muted small me-2">{{ _('Available macros:') }}</span>
+    {% for macro, desc in [('%action-id', _('Violation ID')), ('%attack-name', _('Violation type')), ('%attack-time', _('When it occurred')), ('%client-ip', _('Client IP')), ('%host', _('Host header')), ('%log-id', _('Log entry ID')), ('%s', _('Triggering URL'))] %}
+    <span class="badge bg-light text-dark border me-1" title="{{ desc }}"><code>{{ macro }}</code></span>
+    {% endfor %}
+</div>
+
+{% if error %}
+<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> {{ error }}</div>
+{% endif %}
+
+{% if pages %}
+<div class="row g-3">
+    {% for page in pages %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-file-earmark-text"></i> {{ page.get('name', '—') }}</h6>
+                <div>
+                    {% if user_can_write %}
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editPageModal"
+                        data-page-name="{{ page.get('name', '') }}"
+                        data-page-body="{{ page.get('body', '') | e }}"
+                        data-page-type="{{ page.get('type', '') }}"
+                        title="{{ _('Edit') }}">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger btn-delete-page"
+                        data-page-name="{{ page.get('name', '') }}"
+                        data-account-id="{{ account.id }}"
+                        data-app-id="{{ app_id }}"
+                        title="{{ _('Delete') }}">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                {% if page.get('type') %}
+                <div class="mb-2">
+                    {% set ptype = page.get('type', '').lower() %}
+                    {% if 'block' in ptype or 'deny' in ptype %}
+                    <span class="badge bg-danger"><i class="bi bi-x-octagon"></i> {{ _('Block') }}</span>
+                    {% elif 'captcha' in ptype %}
+                    <span class="badge bg-warning text-dark"><i class="bi bi-shield-check"></i> {{ _('CAPTCHA') }}</span>
+                    {% else %}
+                    <span class="badge bg-secondary">{{ page.get('type') }}</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+                <div class="bg-light rounded p-2" style="max-height:120px; overflow:hidden; font-size:.75rem; font-family:monospace; color:#555">
+                    {{ page.get('body', '') | truncate(300) | e }}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-file-earmark-x fs-1 text-muted d-block mb-3"></i>
+        <p class="text-muted">{{ _('No custom response pages configured. Click Add Page to create one.') }}</p>
+    </div>
+</div>
+{% endif %}
+
+
+{# ===== ADD PAGE MODAL ===== #}
+<div class="modal fade" id="addPageModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-plus"></i> {{ _('Add Response Page') }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                {# Template picker #}
+                <h6 class="mb-3">{{ _('Start from a template:') }}</h6>
+                <div class="row g-2 mb-4" id="pageTemplatePicker">
+                    {% set page_templates = [
+                        {
+                            'label': _('Block Page'),
+                            'icon': 'bi-x-octagon-fill',
+                            'color': 'danger',
+                            'desc': _('Standard security block page'),
+                            'name': 'block-page',
+                            'body': '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>Access Denied</title>\n  <style>\n    body { font-family: Arial, sans-serif; text-align: center; padding: 60px 20px; background: #f8f9fa; }\n    .container { max-width: 500px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }\n    h1 { color: #dc3545; }\n    .details { background: #f8f9fa; padding: 12px; border-radius: 4px; font-size: .85rem; text-align: left; margin-top: 20px; }\n  </style>\n</head>\n<body>\n  <div class="container">\n    <h1>&#x26A0; Access Denied</h1>\n    <p>Your request has been blocked by the security policy.</p>\n    <div class="details">\n      <strong>Violation:</strong> %attack-name<br>\n      <strong>Time:</strong> %attack-time<br>\n      <strong>Your IP:</strong> %client-ip<br>\n      <strong>Reference ID:</strong> %action-id\n    </div>\n  </div>\n</body>\n</html>'
+                        },
+                        {
+                            'label': _('CAPTCHA Page'),
+                            'icon': 'bi-shield-check',
+                            'color': 'warning',
+                            'desc': _('CAPTCHA challenge — do not remove captcha.gif/captcha_resp refs'),
+                            'name': 'captcha-page',
+                            'body': '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>Security Check</title>\n  <style>\n    body { font-family: Arial, sans-serif; text-align: center; padding: 60px 20px; background: #f8f9fa; }\n    .container { max-width: 480px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }\n  </style>\n</head>\n<body>\n  <div class="container">\n    <h2>Security Check</h2>\n    <p>Please complete the CAPTCHA to continue.</p>\n    <form method="POST">\n      <img src="captcha.gif" alt="CAPTCHA"><br><br>\n      <input type="text" name="captcha_resp" placeholder="Enter the code above" required>\n      <input type="hidden" name="captcha_resp_txt" value="">\n      <br><br>\n      <button type="submit">Submit</button>\n    </form>\n  </div>\n</body>\n</html>'
+                        },
+                        {
+                            'label': _('Custom 403'),
+                            'icon': 'bi-ban',
+                            'color': 'secondary',
+                            'desc': _('Simple 403 Forbidden page'),
+                            'name': 'forbidden',
+                            'body': '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>403 Forbidden</title>\n  <style>\n    body { font-family: Arial, sans-serif; text-align: center; padding: 80px 20px; color: #333; }\n    h1 { font-size: 3rem; color: #6c757d; }\n  </style>\n</head>\n<body>\n  <h1>403</h1>\n  <p>You do not have permission to access this resource.</p>\n  <p><small>Host: %host | IP: %client-ip</small></p>\n</body>\n</html>'
+                        },
+                        {
+                            'label': _('Maintenance'),
+                            'icon': 'bi-tools',
+                            'color': 'info',
+                            'desc': _('Maintenance window message'),
+                            'name': 'maintenance',
+                            'body': '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>Maintenance</title>\n  <style>\n    body { font-family: Arial, sans-serif; text-align: center; padding: 80px 20px; background: #fff3cd; }\n    .container { max-width: 500px; margin: 0 auto; }\n    h1 { color: #856404; }\n  </style>\n</head>\n<body>\n  <div class="container">\n    <h1>&#x1F6E0; Scheduled Maintenance</h1>\n    <p>We are currently performing scheduled maintenance. Please check back soon.</p>\n    <p><small>We apologize for the inconvenience.</small></p>\n  </div>\n</body>\n</html>'
+                        },
+                        {
+                            'label': _('Blank'),
+                            'icon': 'bi-file-earmark',
+                            'color': 'light',
+                            'desc': _('Empty HTML — write your own'),
+                            'name': '',
+                            'body': '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>Custom Page</title>\n</head>\n<body>\n  <!-- Your content here -->\n  <!-- Available macros: %attack-name %client-ip %host %attack-time %action-id %log-id %s -->\n</body>\n</html>'
+                        },
+                    ] %}
+                    {% for tpl in page_templates %}
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <button type="button"
+                            class="btn btn-outline-{{ tpl.color }} w-100 h-100 text-start page-template-btn"
+                            data-name="{{ tpl.name }}"
+                            data-body="{{ tpl.body | e }}">
+                            <i class="bi {{ tpl.icon }} d-block fs-4 mb-1"></i>
+                            <span class="fw-semibold small">{{ tpl.label }}</span>
+                            <span class="d-block text-muted" style="font-size:.72rem">{{ tpl.desc }}</span>
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <form id="addPageForm" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">{{ _('Page Name') }} <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="addPageName" name="name" required placeholder="e.g., block-page">
+                            <div class="form-text">{{ _('Unique identifier for this response page.') }}</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ _('Page Type') }}</label>
+                            <select class="form-select" name="type">
+                                <option value="">{{ _('(none)') }}</option>
+                                <option value="block">{{ _('Block') }}</option>
+                                <option value="captcha">{{ _('CAPTCHA') }}</option>
+                                <option value="custom">{{ _('Custom') }}</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2 d-flex justify-content-between align-items-center">
+                        <label class="form-label mb-0">{{ _('HTML Body') }} <span class="text-danger">*</span></label>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="text-muted small">{{ _('Macros:') }}
+                                {% for m in ['%attack-name', '%client-ip', '%host', '%action-id'] %}
+                                <code class="macro-insert-btn" data-target="addPageBody" style="cursor:pointer;user-select:none" title="{{ _('Click to insert') }}">{{ m }}</code>
+                                {% endfor %}
+                                <a href="#" class="macro-more-link ms-1">{{ _('more…') }}</a>
+                            </span>
+                        </div>
+                    </div>
+                    <textarea class="form-control font-monospace" id="addPageBody" name="body" rows="16" required
+                        placeholder="{{ _('Paste or type your HTML here…') }}"></textarea>
+                    <div class="mt-1">
+                        <span class="field-status"></span>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                <button type="submit" form="addPageForm" class="btn btn-success"><i class="bi bi-plus-circle"></i> {{ _('Create Page') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+{# ===== EDIT PAGE MODAL ===== #}
+<div class="modal fade" id="editPageModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> {{ _('Edit Response Page') }}: <span id="editPageTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editPageForm" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                    <input type="hidden" name="page_name" id="editPageNameHidden">
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label mb-0">{{ _('HTML Body') }}</label>
+                            <span class="text-muted small">{{ _('Macros:') }}
+                                {% for m in ['%attack-name', '%client-ip', '%host', '%action-id', '%attack-time', '%log-id', '%s'] %}
+                                <code class="macro-insert-btn" data-target="editPageBody" style="cursor:pointer;user-select:none" title="{{ _('Click to insert') }}">{{ m }}</code>
+                                {% endfor %}
+                            </span>
+                        </div>
+                        <textarea class="form-control font-monospace" id="editPageBody" name="body" rows="20"></textarea>
+                        <div class="mt-1"><span class="field-status"></span></div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                <button type="submit" form="editPageForm" class="btn btn-primary"><i class="bi bi-check-circle"></i> {{ _('Save Changes') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+{# Macro full reference modal #}
+<div class="modal fade" id="macroFullModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">{{ _('Response Page Macros') }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <table class="table table-sm table-bordered">
+                    <thead class="table-light"><tr><th>{{ _('Macro') }}</th><th>{{ _('Inserts') }}</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>%action-id</code></td><td>{{ _('Violation / attack identifier') }}</td></tr>
+                        <tr><td><code>%attack-name</code></td><td>{{ _('Violation type description') }}</td></tr>
+                        <tr><td><code>%attack-time</code></td><td>{{ _('Time the violation occurred (local)') }}</td></tr>
+                        <tr><td><code>%client-ip</code></td><td>{{ _("Requesting client's IP address") }}</td></tr>
+                        <tr><td><code>%host</code></td><td>{{ _("Request's Host header value") }}</td></tr>
+                        <tr><td><code>%log-id</code></td><td>{{ _('Firewall log entry identifier') }}</td></tr>
+                        <tr><td><code>%s</code></td><td>{{ _('URL that triggered the violation') }}</td></tr>
+                    </tbody>
+                </table>
+                <div class="alert alert-warning py-2 mb-0">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    {{ _('CAPTCHA pages: do not remove or rename captcha.gif, captcha_resp, or captcha_resp_txt — these are required for the CAPTCHA to function.') }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script>
+(function () {
+    const csrfToken = '{{ csrf_token() }}';
+
+    function showStatus(el, msg, ok) {
+        if (!el) return;
+        el.textContent = msg;
+        el.className = 'field-status ' + (ok ? 'text-success' : 'text-danger');
+        if (ok) setTimeout(() => { el.textContent = ''; }, 3000);
+    }
+
+    async function doPost(url, payload) {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify(payload),
+        });
+        return r.json();
+    }
+
+    // Template picker (add modal)
+    document.querySelectorAll('.page-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const nameEl = document.getElementById('addPageName');
+            const bodyEl = document.getElementById('addPageBody');
+            if (nameEl && !nameEl.value) nameEl.value = btn.dataset.name;
+            if (bodyEl) bodyEl.value = btn.dataset.body.replace(/&#34;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+            nameEl?.focus();
+        });
+    });
+
+    // Edit modal population
+    const editModal = document.getElementById('editPageModal');
+    if (editModal) {
+        editModal.addEventListener('show.bs.modal', e => {
+            const btn = e.relatedTarget;
+            if (!btn) return;
+            document.getElementById('editPageTitle').textContent = btn.dataset.pageName;
+            document.getElementById('editPageNameHidden').value = btn.dataset.pageName;
+            const body = btn.dataset.pageBody || '';
+            document.getElementById('editPageBody').value = body;
+        });
+    }
+
+    // Add form submit
+    const addForm = document.getElementById('addPageForm');
+    if (addForm) {
+        addForm.addEventListener('submit', async e => {
+            e.preventDefault();
+            const statusEl = addForm.querySelector('.field-status');
+            const fd = new FormData(addForm);
+            const payload = {};
+            fd.forEach((v, k) => { if (v) payload[k] = v; });
+            const url = `/applications/${addForm.dataset.accountId}/${addForm.dataset.appId}/response-pages/create`;
+            const res = await doPost(url, payload);
+            if (res.success) {
+                showStatus(statusEl, '{{ _("Page created") }}', true);
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showStatus(statusEl, res.error || '{{ _("Error") }}', false);
+            }
+        });
+    }
+
+    // Edit form submit
+    const editForm = document.getElementById('editPageForm');
+    if (editForm) {
+        editForm.addEventListener('submit', async e => {
+            e.preventDefault();
+            const statusEl = editForm.querySelector('.field-status');
+            const fd = new FormData(editForm);
+            const payload = {};
+            fd.forEach((v, k) => { payload[k] = v; });
+            const url = `/applications/${editForm.dataset.accountId}/${editForm.dataset.appId}/response-pages/update`;
+            const res = await doPost(url, payload);
+            if (res.success) {
+                showStatus(statusEl, '{{ _("Saved") }}', true);
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showStatus(statusEl, res.error || '{{ _("Error") }}', false);
+            }
+        });
+    }
+
+    // Delete buttons
+    document.querySelectorAll('.btn-delete-page').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const pageName = btn.dataset.pageName;
+            if (!confirm(`{{ _('Delete response page') }} "${pageName}"?`)) return;
+            const url = `/applications/${btn.dataset.accountId}/${btn.dataset.appId}/response-pages/delete`;
+            const res = await doPost(url, { page_name: pageName });
+            if (res.success) {
+                location.reload();
+            } else {
+                alert(res.error || '{{ _("Delete failed") }}');
+            }
+        });
+    });
+
+    // Macro insert on click
+    document.querySelectorAll('.macro-insert-btn').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const target = document.getElementById(chip.dataset.target);
+            if (!target) return;
+            const start = target.selectionStart;
+            const end = target.selectionEnd;
+            const before = target.value.substring(0, start);
+            const after = target.value.substring(end);
+            target.value = before + chip.textContent + after;
+            target.selectionStart = target.selectionEnd = start + chip.textContent.length;
+            target.focus();
+        });
+    });
+
+    // Macro more link
+    document.querySelectorAll('.macro-more-link').forEach(link => {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            new bootstrap.Modal(document.getElementById('macroFullModal')).show();
+        });
+    });
+})();
+</script>
+{% endblock %}

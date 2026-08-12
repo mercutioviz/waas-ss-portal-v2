@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help: Raw Configs') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('help.index') }}">{{ _('Help') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Raw Configs') }}</li>
+    </ol>
+</nav>
+
+<h2 class="mt-3 mb-4"><i class="bi bi-braces"></i> {{ _('Raw Configs') }}</h2>
+
+<div class="row g-4">
+<div class="col-lg-8">
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('What Are Raw Configs?') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Raw Configs let you view and edit the raw WaaS v4 API payload for any application. They give you full control over security settings, request limits, and endpoint configuration at the API level.') }}</p>
+            <p class="mb-0">{{ _('Unlike Templates (which are named, reusable, and apply a curated set of settings), Raw Configs expose the exact JSON the API expects. Use them when you need fine-grained control that Templates don\'t cover.') }}</p>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Raw Configs vs Templates') }}</h5></div>
+        <div class="card-body">
+            <table class="table mb-0">
+                <thead><tr><th>{{ _('Feature') }}</th><th>{{ _('Raw Configs') }}</th><th>{{ _('Templates') }}</th></tr></thead>
+                <tbody>
+                    <tr><td>{{ _('Granularity') }}</td><td>{{ _('Full API payload') }}</td><td>{{ _('Curated sections') }}</td></tr>
+                    <tr><td>{{ _('Audience') }}</td><td>{{ _('Power users / API-savvy') }}</td><td>{{ _('All operators') }}</td></tr>
+                    <tr><td>{{ _('Reusable') }}</td><td>{{ _('Yes — apply to any app') }}</td><td>{{ _('Yes — named & shareable') }}</td></tr>
+                    <tr><td>{{ _('Import / Export') }}</td><td>{{ _('JSON file') }}</td><td>{{ _('JSON file') }}</td></tr>
+                    <tr><td>{{ _('Bulk Apply') }}</td><td>{{ _('Yes') }}</td><td>{{ _('Yes') }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Creating a Raw Config') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('There are three ways to create a raw config:') }}</p>
+            <ol>
+                <li><strong>{{ _('From scratch') }}</strong> — {{ _('Click "New Raw Config", provide a name, category, and choose the API endpoint and method.') }}</li>
+                <li><strong>{{ _('From an application') }}</strong> — {{ _('On any application\'s detail page, click "Save as Raw Config" to capture its current settings.') }}</li>
+                <li><strong>{{ _('Import') }}</strong> — {{ _('Upload a previously exported JSON file.') }}</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Applying a Raw Config') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Open a raw config and click "Apply". Select a target account and application, then confirm. The raw config payload is sent directly to the WaaS API.') }}</p>
+            <p class="mb-0">{{ _('For bulk operations, use "Bulk Apply" to apply the same config to multiple applications at once. Real-time progress is shown via WebSocket.') }}</p>
+        </div>
+    </div>
+</div>
+</div>
+{% endblock %}

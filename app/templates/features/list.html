@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import page_header, breadcrumbs, empty_state, module_info %}
+{% block title %}{{ _('Raw Configs') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Raw Configs'), None),
+]) }}
+{% endblock %}
+
+{% block content %}
+{{ page_header(
+    'braces',
+    _('Raw Configs'),
+    subtitle=_('Reusable raw WaaS v4 API payloads. Save once, apply to many applications.'),
+    actions=(
+      [
+        {'url': url_for('features.import_feature'), 'label': _('Import'), 'icon': 'upload', 'class': 'btn-outline-secondary'},
+        {'url': url_for('features.add_feature'),    'label': _('New Raw Config'), 'icon': 'plus-circle', 'class': 'btn-primary'},
+      ] if current_user.role != 'viewer' else []
+    )
+) }}
+
+{{ module_info(
+    'raw_configs',
+    'info-circle',
+    _('What are Raw Configs?'),
+    _('Raw Configs hold the verbatim JSON body of a v4 WaaS API call (e.g. /import/, /basic_security/). Use them when you need full control over the payload.') ~ ' <a href="' ~ url_for('templates.list_templates') ~ '">' ~ _('For named, reusable presets, see Templates →') ~ '</a>',
+    help_topic='help.raw_configs'
+) }}
+
+<!-- Search -->
+<div class="mb-3">
+    <input type="text" class="form-control" id="featureSearch" placeholder="{{ _('Search raw configs...') }}" data-search-target="feature-row">
+</div>
+
+<!-- My Raw Configs -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-person"></i> {{ _('My Raw Configs') }} ({{ my_features | length }})</h5>
+    </div>
+    {% if my_features %}
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Category') }}</th>
+                        <th>{{ _('Description') }}</th>
+                        <th class="d-none d-md-table-cell">{{ _('Applied To') }}</th>
+                        <th class="d-none d-md-table-cell">{{ _('Updated') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in my_features %}
+                    <tr class="feature-row">
+                        <td><a href="{{ url_for('features.view_feature', feature_id=f.id) }}"><strong>{{ f.name }}</strong></a></td>
+                        <td><span class="badge {{ category_badges.get(f.category, 'bg-secondary') }}">{{ f.category or 'Custom' }}</span></td>
+                        <td>{{ f.description or '' | truncate(50) }}</td>
+                        <td class="d-none d-md-table-cell"><span class="badge bg-secondary">{{ f.applications.count() }} {{ _('apps') }}</span></td>
+                        <td class="d-none d-md-table-cell">{{ f.updated_at | datetime_format }}</td>
+                        <td>
+                            <a href="{{ url_for('features.edit_feature', feature_id=f.id) }}" class="btn btn-sm btn-outline-primary" title="{{ _('Edit') }}" aria-label="{{ _('Edit') }}"><i class="bi bi-pencil"></i></a>
+                            <a href="{{ url_for('features.edit_config', feature_id=f.id) }}" class="btn btn-sm btn-outline-secondary" title="{{ _('Edit Config') }}" aria-label="{{ _('Edit Config') }}"><i class="bi bi-code-slash"></i></a>
+                            <a href="{{ url_for('features.export_feature', feature_id=f.id) }}" class="btn btn-sm btn-outline-success" title="{{ _('Export') }}" aria-label="{{ _('Export') }}"><i class="bi bi-download"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    {{ empty_state(
+        'braces',
+        _('No Raw Configs Yet'),
+        _('Create a raw config to save and re-apply a JSON API payload across applications.'),
+        cta=({'url': url_for('features.add_feature'), 'label': _('Create Raw Config'), 'icon': 'plus-circle'} if current_user.role != 'viewer' else None)
+    ) }}
+    {% endif %}
+</div>
+
+<!-- Global Raw Configs -->
+{% if global_features %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-globe2"></i> {{ _('Global Raw Configs') }} ({{ global_features | length }})</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Category') }}</th>
+                        <th>{{ _('Description') }}</th>
+                        <th class="d-none d-md-table-cell">{{ _('Applied To') }}</th>
+                        <th class="d-none d-md-table-cell">{{ _('Created By') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in global_features %}
+                    <tr class="feature-row">
+                        <td><a href="{{ url_for('features.view_feature', feature_id=f.id) }}"><strong>{{ f.name }}</strong></a></td>
+                        <td><span class="badge {{ category_badges.get(f.category, 'bg-secondary') }}">{{ f.category or 'Custom' }}</span></td>
+                        <td>{{ f.description or '' | truncate(50) }}</td>
+                        <td class="d-none d-md-table-cell"><span class="badge bg-secondary">{{ f.applications.count() }} {{ _('apps') }}</span></td>
+                        <td class="d-none d-md-table-cell">{{ f.user.display_name }}</td>
+                        <td>
+                            <a href="{{ url_for('features.view_feature', feature_id=f.id) }}" class="btn btn-sm btn-outline-primary" title="{{ _('View') }}" aria-label="{{ _('View') }}"><i class="bi bi-eye"></i></a>
+                            <a href="{{ url_for('features.export_feature', feature_id=f.id) }}" class="btn btn-sm btn-outline-success" title="{{ _('Export') }}" aria-label="{{ _('Export') }}"><i class="bi bi-download"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Predefined Raw Configs -->
+{% if predefined_features %}
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-shield-lock"></i> {{ _('Predefined Raw Configs') }} ({{ predefined_features | length }})</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Category') }}</th>
+                        <th>{{ _('Description') }}</th>
+                        <th class="d-none d-md-table-cell">{{ _('Applied To') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in predefined_features %}
+                    <tr class="feature-row">
+                        <td>
+                            <a href="{{ url_for('features.view_feature', feature_id=f.id) }}"><strong>{{ f.name }}</strong></a>
+                            <span class="badge bg-dark ms-1">{{ _('Built-in') }}</span>
+                            <br><small class="text-muted"><code>{{ f.api_method }} {{ f.api_endpoint | replace('/applications/{app_id}/', '...') }}</code></small>
+                        </td>
+                        <td><span class="badge {{ category_badges.get(f.category, 'bg-secondary') }}">{{ f.category or 'Custom' }}</span></td>
+                        <td>{{ f.description or '' | truncate(50) }}</td>
+                        <td class="d-none d-md-table-cell"><span class="badge bg-secondary">{{ f.applications.count() }} {{ _('apps') }}</span></td>
+                        <td>
+                            <a href="{{ url_for('features.view_feature', feature_id=f.id) }}" class="btn btn-sm btn-outline-primary" title="{{ _('View') }}" aria-label="{{ _('View') }}"><i class="bi bi-eye"></i></a>
+                            <a href="{{ url_for('features.export_feature', feature_id=f.id) }}" class="btn btn-sm btn-outline-success" title="{{ _('Export') }}" aria-label="{{ _('Export') }}"><i class="bi bi-download"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('featureSearch')?.addEventListener('input', function() {
+    const query = this.value.toLowerCase();
+    document.querySelectorAll('.feature-row').forEach(function(row) {
+        row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Profile') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Profile'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-person"></i> {{ _('Your Profile') }}</h5>
+                <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#editProfile" aria-expanded="false">
+                    <i class="bi bi-pencil"></i> {{ _('Edit') }}
+                </button>
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th style="width:35%">{{ _('Username') }}</th><td>{{ current_user.username }}</td></tr>
+                    <tr><th>{{ _('Display Name') }}</th><td>{{ current_user.display_name }}</td></tr>
+                    <tr><th>{{ _('Email') }}</th><td>{{ current_user.email or _('Not set') }}</td></tr>
+                    <tr><th>{{ _('Role') }}</th><td><span class="badge bg-primary">{{ current_user.role }}</span></td></tr>
+                    <tr><th>{{ _('Last Login') }}</th><td>{{ current_user.last_login|datetime_format if current_user.last_login else _('N/A') }}</td></tr>
+                    <tr><th>{{ _('Login Count') }}</th><td>{{ current_user.login_count or 0 }}</td></tr>
+                    <tr><th>{{ _('Account Created') }}</th><td>{{ current_user.created_at|datetime_format }}</td></tr>
+                </table>
+
+                <div class="collapse mt-3" id="editProfile">
+                    <hr>
+                    <form method="POST" action="{{ url_for('auth.update_profile') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="mb-3">
+                            <label for="first_name" class="form-label">{{ _('First Name') }}</label>
+                            <input type="text" class="form-control" name="first_name" id="first_name"
+                                   value="{{ current_user.first_name or '' }}" placeholder="{{ _('First name') }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="last_name" class="form-label">{{ _('Last Name') }}</label>
+                            <input type="text" class="form-control" name="last_name" id="last_name"
+                                   value="{{ current_user.last_name or '' }}" placeholder="{{ _('Last name') }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="email" class="form-label">{{ _('Email') }}</label>
+                            <input type="email" class="form-control" name="email" id="email"
+                                   value="{{ current_user.email or '' }}" placeholder="user@example.com">
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg"></i> {{ _('Save Profile') }}</button>
+                    </form>
+                </div>
+            </div>
+            <div class="card-footer d-flex gap-2 flex-wrap">
+                <a href="{{ url_for('auth.change_password') }}" class="btn btn-primary btn-sm"><i class="bi bi-lock"></i> {{ _('Change Password') }}</a>
+                <a href="{{ url_for('auth.notification_preferences') }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-bell"></i> {{ _('Notification Preferences') }}</a>
+                <a href="{{ url_for('auth.notifications') }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-bell-fill"></i> {{ _('Notifications') }}</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 mt-4">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-sliders"></i> {{ _('Display Preferences') }}</h5></div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('auth.update_preferences') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="show_technical" id="showTechnical"
+                               {% if current_user.show_technical %}checked{% endif %} onchange="this.form.submit()">
+                        <label class="form-check-label" for="showTechnical">{{ _('Show technical details') }}</label>
+                    </div>
+                    <div class="form-text">{{ _('When enabled, API version badges (v2/v4) and other technical metadata are shown on resource pages.') }}</div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

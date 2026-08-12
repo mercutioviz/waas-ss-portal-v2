@@ -1,0 +1,134 @@
+{# Page-level layout macros: page header, breadcrumbs, empty state, module info card.
+   Import in a template via:
+       {% from "macros/page.html" import page_header, breadcrumbs, empty_state, module_info %}
+#}
+
+{# Standard page header with icon + title + optional subtitle + optional action buttons.
+   `actions` is a list of dicts with keys: label, url, icon (optional), class (default "btn-outline-secondary"), method ("get" default or "post" wraps in a form with CSRF), confirm (optional message uses global modal). #}
+{% macro page_header(icon, title, subtitle=None, actions=None, help_topic=None) %}
+<div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-2 mt-4 mb-3">
+  <div>
+    <h2 class="mb-1">
+      <i class="bi bi-{{ icon }}"></i> {{ title }}
+      {% if help_topic %}
+      <a href="{{ url_for(help_topic) }}"
+         class="text-muted small ms-1"
+         data-bs-toggle="tooltip"
+         title="{{ _('Open help') }}"
+         aria-label="{{ _('Help') }}">
+        <i class="bi bi-question-circle"></i>
+      </a>
+      {% endif %}
+    </h2>
+    {% if subtitle %}<p class="text-muted mb-0 small">{{ subtitle }}</p>{% endif %}
+  </div>
+  {% if actions %}
+  <div class="d-flex gap-2 flex-wrap">
+    {% for a in actions %}
+      {% if a.method == 'post' %}
+        <form method="post" action="{{ a.url }}" class="d-inline"{% if a.confirm %} data-confirm="{{ a.confirm }}"{% endif %}>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn {{ a.class or 'btn-outline-secondary' }}">
+            {% if a.icon %}<i class="bi bi-{{ a.icon }}"></i> {% endif %}{{ a.label }}
+          </button>
+        </form>
+      {% else %}
+        <a href="{{ a.url }}" class="btn {{ a.class or 'btn-outline-secondary' }}"
+           {% if a.confirm %}data-confirm="{{ a.confirm }}"{% endif %}>
+          {% if a.icon %}<i class="bi bi-{{ a.icon }}"></i> {% endif %}{{ a.label }}
+        </a>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+
+{# Breadcrumbs from a list of (label, url_or_none) tuples.
+   The last item is rendered as the active (non-link) crumb.
+   Pass url=None for the active crumb, e.g.:
+       {{ breadcrumbs([(_('Dashboard'), url_for('main.dashboard')),
+                       (_('Accounts'),  url_for('accounts.list_accounts')),
+                       (account.account_name, None)]) }}
+#}
+{% macro breadcrumbs(items) %}
+<nav aria-label="breadcrumb" class="mt-3">
+  <ol class="breadcrumb mb-0">
+    {% for label, href in items %}
+      {% if loop.last or not href %}
+        <li class="breadcrumb-item active" aria-current="page">{{ label }}</li>
+      {% else %}
+        <li class="breadcrumb-item"><a href="{{ href }}">{{ label }}</a></li>
+      {% endif %}
+    {% endfor %}
+  </ol>
+</nav>
+{% endmacro %}
+
+
+{# Empty state card for list pages with no data.
+   cta is optional dict with {label, url, icon}. #}
+{% macro empty_state(icon, title, message, cta=None) %}
+<div class="card my-4">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-{{ icon }} display-1 text-muted"></i>
+    <h4 class="mt-3">{{ title }}</h4>
+    <p class="text-muted mb-3">{{ message }}</p>
+    {% if cta %}
+    <a href="{{ cta.url }}" class="btn btn-primary">
+      {% if cta.icon %}<i class="bi bi-{{ cta.icon }}"></i> {% endif %}{{ cta.label }}
+    </a>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+
+{# Dismissible module info card. Shown above the main content on list pages.
+   `key` must be unique per module — used as localStorage flag so the user can dismiss it permanently. #}
+{% macro module_info(key, icon, title, body, help_topic=None) %}
+<div class="alert alert-info border-0 d-flex align-items-start gap-3 module-info-card"
+     data-info-key="{{ key }}" role="region" aria-label="{{ title }}">
+  <i class="bi bi-{{ icon }} fs-3 mt-1 flex-shrink-0"></i>
+  <div class="flex-grow-1">
+    <h6 class="alert-heading mb-1">{{ title }}</h6>
+    <p class="mb-0 small">{{ body }}
+      {% if help_topic %}
+      <a href="{{ url_for(help_topic) }}" class="alert-link">{{ _('Learn more') }} <i class="bi bi-arrow-right-short"></i></a>
+      {% endif %}
+    </p>
+  </div>
+  <button type="button" class="btn-close flex-shrink-0" data-bs-dismiss="alert" aria-label="{{ _('Dismiss') }}"></button>
+</div>
+{% endmacro %}
+
+
+{# Account context chip with switch dropdown.
+   `selected` is the current WaasAccount object.
+   `all_accounts` is the full list available to the user.
+   `switch_endpoint` is the Flask endpoint to link to (e.g. 'applications.list_applications'). #}
+{% macro account_chip(selected, all_accounts, switch_endpoint) %}
+<div class="d-inline-flex align-items-center mb-3">
+  <span class="text-muted me-1">{{ _('Account:') }}</span>
+  {% if all_accounts|length > 1 %}
+  <div class="dropdown d-inline">
+    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+      <strong>{{ selected.account_name }}</strong>
+    </button>
+    <ul class="dropdown-menu">
+      {% for acct in all_accounts %}
+      <li>
+        <a class="dropdown-item {% if acct.id == selected.id %}active{% endif %}"
+           href="{{ url_for(switch_endpoint, account_id=acct.id) }}">
+          {{ acct.account_name }}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <strong>{{ selected.account_name }}</strong>
+  {% endif %}
+</div>
+{% endmacro %}

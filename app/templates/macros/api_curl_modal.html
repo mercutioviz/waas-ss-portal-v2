@@ -1,0 +1,32 @@
+{# Reusable API curl command display macro #}
+
+{% macro api_curl_button(modal_id) %}
+<button type="button" class="btn btn-outline-info btn-sm ms-2" data-bs-toggle="modal" data-bs-target="#{{ modal_id }}" title="{{ _('Show API Call') }}">
+    <i class="bi bi-terminal"></i>
+</button>
+{% endmacro %}
+
+{% macro api_curl_modal(id, curl_command) %}
+<div class="modal fade" id="{{ id }}" tabindex="-1" aria-labelledby="{{ id }}Label" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="{{ id }}Label"><i class="bi bi-terminal"></i> {{ _('API Call') }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <div class="modal-body">
+                <pre class="bg-dark text-light p-3 rounded mb-2" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;"><code id="{{ id }}Code">{{ curl_command }}</code></pre>
+                <div class="alert alert-info py-2 mb-0 small">
+                    <i class="bi bi-info-circle"></i> {{ _('Auth tokens are redacted for security. Replace with your actual API key to use this command.') }}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary" onclick="copyToClipboard(document.getElementById('{{ id }}Code').textContent)">
+                    <i class="bi bi-clipboard"></i> {{ _('Copy to Clipboard') }}
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Login') }} - WaaS Portal{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <div class="text-center mb-4">
+                    <i class="bi bi-shield-lock display-3 text-primary"></i>
+                    <h3 class="mt-2">WaaS Portal</h3>
+                    <p class="text-muted">{{ _('Sign in to your account') }}</p>
+                </div>
+                <form method="POST" action="{{ url_for('auth.login') }}" class="needs-validation" novalidate>
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        <label for="username" class="form-label">{{ _('Username') }}</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-person"></i></span>
+                            {{ form.username(class="form-control", placeholder=_('Enter username'), autofocus=true) }}
+                        </div>
+                        {% for error in form.username.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">{{ _('Password') }}</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                            {{ form.password(class="form-control", placeholder=_('Enter password')) }}
+                        </div>
+                        {% for error in form.password.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3 form-check">
+                        {{ form.remember_me(class="form-check-input") }}
+                        <label class="form-check-label" for="remember_me">{{ _('Remember me') }}</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-box-arrow-in-right"></i> {{ _('Sign In') }}
+                    </button>
+                    <div class="text-center mt-3">
+                        <a href="{{ url_for('auth.forgot_password') }}" class="small text-muted">{{ _('Forgot your password?') }}</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

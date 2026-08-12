@@ -1,0 +1,974 @@
+{% extends "base.html" %}
+{% from "macros/help_modal.html" import help_button, help_modal %}
+{% from "macros/api_curl_modal.html" import api_curl_button, api_curl_modal %}
+{% block title %}{{ application.get('name', 'Application') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications') }}">{{ _('Applications') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item active">{{ application.get('name', 'Application') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center mt-4 mb-4 gap-2">
+    <div>
+        <h2 class="d-inline"><i class="bi bi-globe"></i> {{ application.get('name', 'Application') }}</h2>
+        <button type="button" class="btn btn-sm btn-link p-0 ms-1" onclick="copyToClipboard('{{ application.get('name', '') }}')" title="{{ _('Copy app name') }}"><i class="bi bi-clipboard"></i></button>
+        {% if current_user.show_technical %}<span class="badge bg-primary ms-2">v4 API</span>{% endif %}
+        {{ help_button('appViewHelpModal') }}
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('proxy.launch', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-primary"><i class="bi bi-display"></i> {{ _('Browse App') }}</a>
+        <a href="{{ url_for('applications.list_applications', account_id=account.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+    </div>
+</div>
+
+{% if application %}
+{% set servers = application.get('servers', []) %}
+{% set up_count = servers | selectattr('health', 'equalto', 'Up') | list | length %}
+{% set total_count = servers | length %}
+{% set user_can_write = current_user.role != 'viewer' %}
+
+<div class="row g-4">
+    <!-- Application Details -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Application Details') }}</h5></div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th style="width:40%">{{ _('Name') }}</th><td>{{ application.get('name', 'N/A') }}</td></tr>
+                    <tr><th>{{ _('Group') }}</th><td>
+                        {% if application.get('app_group') %}
+                        <span class="badge bg-secondary">{{ application.get('app_group') }}</span>
+                        {% else %}
+                        <span class="text-muted">N/A</span>
+                        {% endif %}
+                    </td></tr>
+                    <tr><th>{{ _('Account') }}</th><td>{{ account.account_name }}</td></tr>
+                    <tr><th>{{ _('Total Servers') }}</th><td>{{ total_count }}</td></tr>
+                    <tr><th>{{ _('Server Health') }}</th><td>
+                        {% if total_count > 0 %}
+                            {% if up_count == total_count %}
+                            <span class="badge bg-success"><i class="bi bi-check-circle"></i> {{ _('All Up') }} ({{ total_count }})</span>
+                            {% elif up_count > 0 %}
+                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> {{ up_count }}/{{ total_count }} {{ _('Up') }}</span>
+                            {% else %}
+                            <span class="badge bg-danger"><i class="bi bi-x-circle"></i> {{ _('All Down') }}</span>
+                            {% endif %}
+                        {% else %}
+                        <span class="text-muted">{{ _('No servers') }}</span>
+                        {% endif %}
+                    </td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header"><h5 class="mb-0">{{ _('Quick Actions') }}</h5></div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('applications.security_config', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-danger">
+                        <i class="bi bi-shield-lock"></i> {{ _('Security Configuration') }}
+                    </a>
+                    <a href="{{ url_for('applications.traffic_rewrites', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left-right"></i> {{ _('Traffic Rewrites') }}
+                    </a>
+                    <a href="{{ url_for('applications.response_pages', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-file-earmark-code"></i> {{ _('Response Pages') }}
+                    </a>
+                    <a href="{{ url_for('applications.dns_info', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-info">
+                        <i class="bi bi-diagram-3"></i> {{ _('DNS / CNAME Info') }}
+                    </a>
+                    <a href="{{ url_for('proxy.launch', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-primary">
+                        <i class="bi bi-display"></i> {{ _('Browse Application via Proxy') }}
+                    </a>
+                    {% if user_can_write %}
+                    <a href="{{ url_for('templates.save_as_template', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-file-earmark-plus"></i> {{ _('Save as Template') }}
+                    </a>
+                    {% if account.has_v2_credentials %}
+                    <a href="{{ url_for('applications.clone_application', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-warning">
+                        <i class="bi bi-copy"></i> {{ _('Clone Application') }}
+                    </a>
+                    {% endif %}
+                    {% if v2_app_id and account.has_v2_credentials %}
+                    <form method="POST" action="{{ url_for('applications.delete_application', account_id=account.id, app_id=v2_app_id) }}" class="d-grid"
+                          data-confirm-message="{{ _('Are you sure you want to delete application &quot;%(name)s&quot;? This cannot be undone.', name=app_id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="app_name" value="{{ app_id }}">
+                        <button type="submit" class="btn btn-outline-danger">
+                            <i class="bi bi-trash"></i> {{ _('Delete Application') }}
+                        </button>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+                    <div class="border rounded p-2 mt-1">
+                        <small class="text-muted d-block mb-2"><i class="bi bi-journal-text"></i> {{ _('Logs') }}</small>
+                        <div class="btn-group w-100">
+                            <a href="{{ url_for('logs.waf_logs', account_id=account.id, app_name=app_id, from='app') }}" class="btn btn-outline-danger">
+                                <i class="bi bi-shield-exclamation"></i> {{ _('WAF') }}
+                            </a>
+                            <a href="{{ url_for('logs.access_logs', account_id=account.id, app_name=app_id, from='app') }}" class="btn btn-outline-primary">
+                                <i class="bi bi-list-ul"></i> {{ _('Access') }}
+                            </a>
+                            <a href="{{ url_for('logs.fp_analysis', account_id=account.id, app_name=app_id, from='app') }}" class="btn btn-outline-warning">
+                                <i class="bi bi-search"></i> {{ _('FP Analysis') }}
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Backend Servers -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-server"></i> {{ _('Backend Servers') }} ({{ total_count }})</h5>
+    </div>
+    {% if servers %}
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Server Name') }}</th>
+                        <th>{{ _('Host') }}</th>
+                        <th>{{ _('Port') }}</th>
+                        <th>{{ _('Protocol') }}</th>
+                        <th>{{ _('Mode') }}</th>
+                        <th>{{ _('Health') }}</th>
+                        <th>{{ _('Weight') }}</th>
+                        {% if user_can_write %}
+                        <th>{{ _('Actions') }}</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for server in servers %}
+                    <tr>
+                        <td><strong>{{ server.get('name', 'N/A') }}</strong>
+                            {% if server.get('is_backup') %}
+                            <span class="badge bg-secondary ms-1">{{ _('Backup') }}</span>
+                            {% endif %}
+                        </td>
+                        <td><code>{{ server.get('host', 'N/A') }}</code></td>
+                        <td>{{ server.get('port', 'N/A') }}</td>
+                        <td>{{ server.get('protocol', 'N/A') }}</td>
+                        <td>
+                            {% if server.get('mode') == 'In Service' %}
+                            <span class="badge bg-success">{{ server.get('mode') }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ server.get('mode', 'Unknown') }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if server.get('health') == 'Up' %}
+                            <span class="badge bg-success"><i class="bi bi-check-circle"></i> {{ _('Up') }}</span>
+                            {% elif server.get('health') == 'Down' %}
+                            <span class="badge bg-danger"><i class="bi bi-x-circle"></i> {{ _('Down') }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ server.get('health', 'Unknown') }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ server.get('weight', 1) }}</td>
+                        {% if user_can_write %}
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editServer-{{ loop.index }}" title="{{ _('Edit') }}">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="card-body text-center py-4">
+        <p class="text-muted mb-0">{{ _('No backend servers configured.') }}</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Server Details (expandable per server) -->
+{% for server in servers %}
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#server-{{ loop.index }}" role="button">
+                <i class="bi bi-chevron-down"></i> {{ server.get('name', 'Server') }} — {{ _('Details') }}
+            </a>
+        </h6>
+    </div>
+    <div class="collapse" id="server-{{ loop.index }}">
+        <div class="card-body">
+            <div class="row">
+                <!-- SSL Settings -->
+                {% if server.get('ssl') %}
+                <div class="col-md-4">
+                    <h6 class="text-muted">{{ _('SSL/TLS') }}</h6>
+                    <table class="table table-sm table-borderless">
+                        <tr><td>TLS 1.0</td><td>{% if server.ssl.get('protocol_tls_1_0_enabled') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                        <tr><td>TLS 1.1</td><td>{% if server.ssl.get('protocol_tls_1_1_enabled') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                        <tr><td>TLS 1.2</td><td>{% if server.ssl.get('protocol_tls_1_2_enabled') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                        <tr><td>TLS 1.3</td><td>{% if server.ssl.get('protocol_tls_1_3_enabled') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                        <tr><td>{{ _('Validate Cert') }}</td><td>{% if server.ssl.get('validate_ssl_certificate') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                        <tr><td>HTTP/2</td><td>{% if server.ssl.get('enable_http2') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                        <tr><td><abbr data-bs-toggle="tooltip" title="{{ _('Server Name Indication — allows hosting multiple SSL certs on one IP') }}">SNI</abbr></td><td>{% if server.ssl.get('enable_sni') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    </table>
+                </div>
+                {% endif %}
+
+                <!-- Health Check Settings -->
+                {% if server.get('health_checks') %}
+                <div class="col-md-4">
+                    <h6 class="text-muted">{{ _('Health Checks') }}</h6>
+                    <table class="table table-sm table-borderless">
+                        <tr><td>{{ _('OOB Enabled') }}</td><td>{% if server.health_checks.get('enable_oob_health_checks') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                        <tr><td>{{ _('Interval') }}</td><td>{{ server.health_checks.get('oob_health_check_interval', 'N/A') }}s</td></tr>
+                        <tr><td>{{ _('URL') }}</td><td><code>{{ server.health_checks.get('healthcheck_http_request_url', '/') }}</code></td></tr>
+                        <tr><td>{{ _('Method') }}</td><td>{{ server.health_checks.get('healthcheck_method', 'GET') }}</td></tr>
+                        <tr><td>{{ _('Expected Status') }}</td><td>{{ server.health_checks.get('healthcheck_status_code', 200) }}</td></tr>
+                    </table>
+                </div>
+                {% endif %}
+
+                <!-- Advanced Settings -->
+                {% if server.get('advanced') %}
+                <div class="col-md-4">
+                    <h6 class="text-muted">{{ _('Connection Settings') }}</h6>
+                    <table class="table table-sm table-borderless">
+                        <tr><td>{{ _('Max Connections') }}</td><td>{{ server.advanced.get('advanced_timing_max_connections', 'N/A') }}</td></tr>
+                        <tr><td>{{ _('Max Requests') }}</td><td>{{ server.advanced.get('advanced_timing_max_requests', 'N/A') }}</td></tr>
+                        <tr><td>{{ _('Timeout (ms)') }}</td><td>{{ server.advanced.get('advanced_timing_timeout', 'N/A') }}</td></tr>
+                        <tr><td>{{ _('Connection Pooling') }}</td><td>{% if server.advanced.get('connection_pooling') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    </table>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Backend Test Results -->
+            {% if server.get('backend_test_result') %}
+            {% set test_result = server.get('backend_test_result', {}) %}
+            {% set overall = test_result.get('overall_test_result', {}) %}
+            <hr>
+            <h6 class="text-muted">{{ _('Backend Connectivity Test') }}</h6>
+            <div>
+                <span class="me-3">TCP:
+                    {% if overall.get('overall_tcp_pass') %}
+                    <span class="badge bg-success">{{ _('Pass') }}</span>
+                    {% else %}
+                    <span class="badge bg-danger">{{ _('Fail') }}</span>
+                    {% endif %}
+                </span>
+                <span>{{ _('Application:') }}
+                    {% if overall.get('overall_application_pass') %}
+                    <span class="badge bg-success">{{ _('Pass') }}</span>
+                    {% else %}
+                    <span class="badge bg-danger">{{ _('Fail') }}</span>
+                    {% endif %}
+                </span>
+                {% if server.get('last_test_time') %}
+                <span class="text-muted ms-3"><small>{{ _('Last tested:') }} {{ server.get('last_test_time') }}</small></span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Server Edit Form (write users only) -->
+    {% if user_can_write %}
+    <div class="collapse" id="editServer-{{ loop.index }}">
+        <div class="card-body border-top bg-light">
+            <h6><i class="bi bi-pencil-square"></i> {{ _('Edit Server:') }} {{ server.get('name', 'Server') }}</h6>
+            <form class="server-edit-form" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" data-server-name="{{ server.get('name', '') }}">
+                <div class="row g-3">
+                    <!-- Basic Settings -->
+                    <div class="col-md-6 col-lg-3">
+                        <label class="form-label">{{ _('Host') }}</label>
+                        <input type="text" class="form-control form-control-sm" name="host" value="{{ server.get('host', '') }}">
+                    </div>
+                    <div class="col-md-6 col-lg-2">
+                        <label class="form-label">{{ _('Port') }}</label>
+                        <input type="number" class="form-control form-control-sm" name="port" value="{{ server.get('port', 443) }}">
+                    </div>
+                    <div class="col-md-6 col-lg-2">
+                        <label class="form-label">{{ _('Protocol') }}</label>
+                        <select class="form-select form-select-sm" name="protocol">
+                            <option value="HTTPS" {{ 'selected' if server.get('protocol') == 'HTTPS' }}>HTTPS</option>
+                            <option value="HTTP" {{ 'selected' if server.get('protocol') == 'HTTP' }}>HTTP</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 col-lg-2">
+                        <label class="form-label">{{ _('Weight') }}</label>
+                        <input type="number" class="form-control form-control-sm" name="weight" value="{{ server.get('weight', 1) }}" min="1" max="100">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label class="form-label">{{ _('Mode') }}</label>
+                        <select class="form-select form-select-sm" name="mode">
+                            <option value="In Service" {{ 'selected' if server.get('mode') == 'In Service' }}>{{ _('In Service') }}</option>
+                            <option value="Out of Service" {{ 'selected' if server.get('mode') == 'Out of Service' }}>{{ _('Out of Service') }}</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" name="is_backup" {{ 'checked' if server.get('is_backup') }}>
+                            <label class="form-check-label">{{ _('Backup Server') }}</label>
+                        </div>
+                    </div>
+
+                    <!-- SSL/TLS Settings -->
+                    {% if server.get('ssl') %}
+                    <div class="col-12"><hr><h6 class="text-muted">{{ _('SSL/TLS Settings') }}</h6></div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="ssl.protocol_tls_1_0_enabled" {{ 'checked' if server.ssl.get('protocol_tls_1_0_enabled') }}><label class="form-check-label">TLS 1.0</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="ssl.protocol_tls_1_1_enabled" {{ 'checked' if server.ssl.get('protocol_tls_1_1_enabled') }}><label class="form-check-label">TLS 1.1</label></div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="ssl.protocol_tls_1_2_enabled" {{ 'checked' if server.ssl.get('protocol_tls_1_2_enabled') }}><label class="form-check-label">TLS 1.2</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="ssl.protocol_tls_1_3_enabled" {{ 'checked' if server.ssl.get('protocol_tls_1_3_enabled') }}><label class="form-check-label">TLS 1.3</label></div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="ssl.validate_ssl_certificate" {{ 'checked' if server.ssl.get('validate_ssl_certificate') }}><label class="form-check-label">{{ _('Validate Certificate') }}</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="ssl.enable_http2" {{ 'checked' if server.ssl.get('enable_http2') }}><label class="form-check-label">HTTP/2</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="ssl.enable_sni" {{ 'checked' if server.ssl.get('enable_sni') }}><label class="form-check-label">SNI</label></div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Health Check Settings -->
+                    {% if server.get('health_checks') %}
+                    <div class="col-12"><hr><h6 class="text-muted">{{ _('Health Check Settings') }}</h6></div>
+                    <div class="col-md-6 col-lg-3">
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="health_checks.enable_oob_health_checks" {{ 'checked' if server.health_checks.get('enable_oob_health_checks') }}><label class="form-check-label">{{ _('Enable OOB') }}</label></div>
+                    </div>
+                    <div class="col-md-6 col-lg-2">
+                        <label class="form-label">{{ _('Interval (s)') }}</label>
+                        <input type="number" class="form-control form-control-sm" name="health_checks.oob_health_check_interval" value="{{ server.health_checks.get('oob_health_check_interval', 10) }}">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label class="form-label">{{ _('URL') }}</label>
+                        <input type="text" class="form-control form-control-sm" name="health_checks.healthcheck_http_request_url" value="{{ server.health_checks.get('healthcheck_http_request_url', '/') }}">
+                    </div>
+                    <div class="col-md-6 col-lg-2">
+                        <label class="form-label">{{ _('Method') }}</label>
+                        <select class="form-select form-select-sm" name="health_checks.healthcheck_method">
+                            <option value="GET" {{ 'selected' if server.health_checks.get('healthcheck_method') == 'GET' }}>GET</option>
+                            <option value="HEAD" {{ 'selected' if server.health_checks.get('healthcheck_method') == 'HEAD' }}>HEAD</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 col-lg-2">
+                        <label class="form-label">{{ _('Expected Status') }}</label>
+                        <input type="number" class="form-control form-control-sm" name="health_checks.healthcheck_status_code" value="{{ server.health_checks.get('healthcheck_status_code', 200) }}">
+                    </div>
+                    {% endif %}
+
+                    <!-- Connection Settings -->
+                    {% if server.get('advanced') %}
+                    <div class="col-12"><hr><h6 class="text-muted">{{ _('Connection Settings') }}</h6></div>
+                    <div class="col-md-6 col-lg-3">
+                        <label class="form-label">{{ _('Max Connections') }}</label>
+                        <input type="number" class="form-control form-control-sm" name="advanced.advanced_timing_max_connections" value="{{ server.advanced.get('advanced_timing_max_connections', '') }}">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label class="form-label">{{ _('Max Requests') }}</label>
+                        <input type="number" class="form-control form-control-sm" name="advanced.advanced_timing_max_requests" value="{{ server.advanced.get('advanced_timing_max_requests', '') }}">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label class="form-label">{{ _('Timeout (ms)') }}</label>
+                        <input type="number" class="form-control form-control-sm" name="advanced.advanced_timing_timeout" value="{{ server.advanced.get('advanced_timing_timeout', '') }}">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <div class="form-check form-switch mt-4"><input class="form-check-input" type="checkbox" name="advanced.connection_pooling" {{ 'checked' if server.advanced.get('connection_pooling') }}><label class="form-check-label">{{ _('Connection Pooling') }}</label></div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-check-circle"></i> {{ _('Save Server Changes') }}
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#editServer-{{ loop.index }}">
+                        {{ _('Cancel') }}
+                    </button>
+                    <span class="field-status ms-2"></span>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+<!-- Endpoints / Deployment -->
+{% set ep = application.get('endpoints', {}) %}
+{% if ep and ep is mapping %}
+{% set ports = ep.get('ports', []) %}
+{% set domains = ep.get('domains', []) %}
+{% set deployment = ep.get('deployment', {}) %}
+{% set cname = ep.get('cname', '') %}
+{% set cert_info = ep.get('certificate', {}) %}
+
+<div class="row g-4 mt-2">
+    <!-- Ports -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-plug"></i> {{ _('Ports') }} ({{ ports | length }})</h5></div>
+            {% if ports %}
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>{{ _('Port') }}</th>
+                                <th>{{ _('Protocol') }}</th>
+                                <th>{{ _('WAF') }}</th>
+                                <th>HTTP/2</th>
+                                {% if user_can_write %}
+                                <th>{{ _('Actions') }}</th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in ports %}
+                            <tr>
+                                <td><strong>{{ p.get('port', 'N/A') }}</strong></td>
+                                <td>{{ p.get('protocol', 'N/A') }}</td>
+                                <td>{% if p.get('advanced_configuration', {}).get('enable_web_application_firewall') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td>
+                                <td>{% if p.get('advanced_configuration', {}).get('enable_http2') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td>
+                                {% if user_can_write %}
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editPort-{{ loop.index }}" title="{{ _('Edit') }}">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% if user_can_write %}
+                            <tr class="collapse" id="editPort-{{ loop.index }}">
+                                <td colspan="5" class="bg-light">
+                                    <form class="port-edit-form d-flex gap-3 align-items-center flex-wrap" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" data-port="{{ p.get('port', '') }}">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" name="enable_web_application_firewall" {{ 'checked' if p.get('advanced_configuration', {}).get('enable_web_application_firewall') }}>
+                                            <label class="form-check-label">{{ _('WAF') }}</label>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" name="enable_http2" {{ 'checked' if p.get('advanced_configuration', {}).get('enable_http2') }}>
+                                            <label class="form-check-label">HTTP/2</label>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-circle"></i> {{ _('Save') }}</button>
+                                        <span class="field-status"></span>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <div class="card-body text-center py-3"><span class="text-muted">{{ _('No ports configured.') }}</span></div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Deployment -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-cloud"></i> {{ _('Deployment &') }} <abbr data-bs-toggle="tooltip" title="{{ _('A DNS record that maps your domain to the WaaS proxy hostname') }}">CNAME</abbr></h5></div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    {% if cname %}
+                    <tr><th style="width:40%">CNAME</th><td><code>{{ cname }}</code></td></tr>
+                    {% endif %}
+                    {% if deployment %}
+                    <tr><th>{{ _('Primary Region') }}</th><td>{{ deployment.get('primary', 'N/A') }}</td></tr>
+                    <tr><th>{{ _('Secondary Region') }}</th><td>{{ deployment.get('secondary', 'N/A') }}</td></tr>
+                    <tr><th>{{ _('Auto Region') }}</th><td>{% if deployment.get('is_auto_region') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    <tr><th>{{ _('Dedicated IP') }}</th><td>{% if deployment.get('is_dedicated_ip') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    {% endif %}
+                    {% if cert_info and cert_info is mapping %}
+                    <tr><th>{{ _('Auto Certificate') }}</th><td>{% if cert_info.get('use_automatic') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    {% endif %}
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Domains -->
+{% if domains %}
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-globe2"></i> {{ _('Domains') }} ({{ domains | length }})</h5>
+    </div>
+    <div class="card-body">
+        {% for domain in domains %}
+        <span class="badge bg-secondary me-1 mb-1" style="font-size: 0.9em;"><code class="text-white">{{ domain }}</code></span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- HTTPS / TLS Settings -->
+{% set https_cfg = ep.get('https', {}) %}
+{% if https_cfg %}
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-shield-lock"></i> {{ _('Frontend TLS Settings') }}</h5>
+        {% if user_can_write %}
+        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editTls" title="{{ _('Edit') }}">
+            <i class="bi bi-pencil"></i> {{ _('Edit') }}
+        </button>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <table class="table table-sm table-borderless mb-0">
+                    <tr><td>SSL 3.0</td><td>{% if https_cfg.get('enable_ssl_3') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    <tr><td>TLS 1.0</td><td>{% if https_cfg.get('enable_tls_1') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    <tr><td>TLS 1.1</td><td>{% if https_cfg.get('enable_tls_1_1') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    <tr><td>TLS 1.2</td><td>{% if https_cfg.get('enable_tls_1_2') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    <tr><td>TLS 1.3</td><td>{% if https_cfg.get('enable_tls_1_3') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <table class="table table-sm table-borderless mb-0">
+                    <tr><td>{{ _('PFS') }}</td><td>{% if https_cfg.get('enable_pfs') %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}</td></tr>
+                    <tr><td>{{ _('Cipher Suite') }}</td><td><code>{{ https_cfg.get('cipher_suite_name', 'N/A') }}</code></td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% if user_can_write %}
+    <div class="collapse" id="editTls">
+        <div class="card-body border-top bg-light">
+            <h6><i class="bi bi-pencil-square"></i> {{ _('Edit Frontend TLS Settings') }}</h6>
+            <form class="tls-edit-form" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enable_ssl_3" {{ 'checked' if https_cfg.get('enable_ssl_3') }}><label class="form-check-label">SSL 3.0</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enable_tls_1" {{ 'checked' if https_cfg.get('enable_tls_1') }}><label class="form-check-label">TLS 1.0</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enable_tls_1_1" {{ 'checked' if https_cfg.get('enable_tls_1_1') }}><label class="form-check-label">TLS 1.1</label></div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enable_tls_1_2" {{ 'checked' if https_cfg.get('enable_tls_1_2') }}><label class="form-check-label">TLS 1.2</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enable_tls_1_3" {{ 'checked' if https_cfg.get('enable_tls_1_3') }}><label class="form-check-label">TLS 1.3</label></div>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enable_pfs" {{ 'checked' if https_cfg.get('enable_pfs') }}><label class="form-check-label">{{ _('PFS') }}</label></div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">{{ _('Cipher Suite') }}</label>
+                        <select class="form-select form-select-sm" name="cipher_suite_name">
+                            {% for cs, label in [('all', 'All'), ('mozilla_old_compatibility_suite', 'Mozilla Old'), ('mozilla_intermediate_compatibility_suite', 'Mozilla Intermediate'), ('mozilla_modern_compatibility_suite', 'Mozilla Modern'), ('custom', 'Custom')] %}
+                            <option value="{{ cs }}" {{ 'selected' if https_cfg.get('cipher_suite_name') == cs }}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-circle"></i> {{ _('Save TLS Settings') }}</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#editTls">{{ _('Cancel') }}</button>
+                    <span class="field-status ms-2"></span>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endif %}
+
+<!-- URL Access & Redirects -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-signpost-2"></i> {{ _('URL Access & Redirects') }} ({{ url_access_rules | length }})</h5>
+        {% if user_can_write %}
+        <button class="btn btn-sm btn-outline-success" data-bs-toggle="collapse" data-bs-target="#addUrlAccessRule">
+            <i class="bi bi-plus-circle"></i> {{ _('Add Rule') }}
+        </button>
+        {% endif %}
+    </div>
+    {% if url_access_rules %}
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('URL Match') }}</th>
+                        <th>{{ _('Action') }}</th>
+                        <th>{{ _('Redirect URL') }}</th>
+                        <th>{{ _('Status Code') }}</th>
+                        {% if user_can_write %}
+                        <th>{{ _('Actions') }}</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in url_access_rules %}
+                    <tr>
+                        <td><strong>{{ rule.get('name', 'N/A') }}</strong></td>
+                        <td><code>{{ rule.get('url_match', rule.get('url', 'N/A')) }}</code></td>
+                        <td>
+                            {% set action = rule.get('action_type', rule.get('action', 'N/A')) %}
+                            {% if action == 'Redirect' %}
+                            <span class="badge bg-info">{{ action }}</span>
+                            {% elif action == 'Allow' %}
+                            <span class="badge bg-success">{{ action }}</span>
+                            {% elif action == 'Deny URL' or action == 'Deny' %}
+                            <span class="badge bg-danger">{{ action }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ action }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ rule.get('redirect_url', '-') | null_dash }}</td>
+                        <td>{{ rule.get('redirect_status_code', '-') | null_dash }}</td>
+                        {% if user_can_write %}
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editUrlRule-{{ loop.index }}" title="{{ _('Edit') }}">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger btn-delete-url-rule" data-rule-name="{{ rule.get('name', '') }}" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" title="{{ _('Delete') }}">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% if user_can_write %}
+                    <tr class="collapse" id="editUrlRule-{{ loop.index }}">
+                        <td colspan="6" class="bg-light">
+                            <form class="url-rule-edit-form p-2" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}" data-rule-name="{{ rule.get('name', '') }}">
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('URL Match') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="url_match" value="{{ rule.get('url_match', rule.get('url', '')) }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Action') }}</label>
+                                        <select class="form-select form-select-sm" name="action_type">
+                                            {% for val in ['Allow', 'Deny URL', 'Redirect'] %}
+                                            <option value="{{ val }}" {{ 'selected' if rule.get('action_type', rule.get('action')) == val }}>{{ val }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">{{ _('Redirect URL') }}</label>
+                                        <input type="text" class="form-control form-control-sm" name="redirect_url" value="{{ rule.get('redirect_url', '') }}">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">{{ _('Status Code') }}</label>
+                                        <select class="form-select form-select-sm" name="redirect_status_code">
+                                            {% for code in ['301', '302', '303', '307', '308'] %}
+                                            <option value="{{ code }}" {{ 'selected' if rule.get('redirect_status_code')|string == code }}>{{ code }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-circle"></i> {{ _('Save') }}</button>
+                                        <span class="field-status"></span>
+                                    </div>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="card-body text-center py-4">
+        <p class="text-muted mb-0">{{ _('No URL access redirect rules configured.') }}</p>
+    </div>
+    {% endif %}
+
+    {% if user_can_write %}
+    <div class="collapse" id="addUrlAccessRule">
+        <div class="card-body border-top bg-light">
+            <h6><i class="bi bi-plus-circle"></i> {{ _('Add URL Access Rule') }}</h6>
+            <form class="url-rule-create-form" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                <div class="row g-3">
+                    <div class="col-md-2">
+                        <label class="form-label">{{ _('Rule Name') }}</label>
+                        <input type="text" class="form-control form-control-sm" name="name" required placeholder="{{ _('e.g., redirect-old') }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">{{ _('URL Match') }}</label>
+                        <input type="text" class="form-control form-control-sm" name="url_match" required placeholder="{{ _('e.g., /old-page*') }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">{{ _('Action') }}</label>
+                        <select class="form-select form-select-sm" name="action_type">
+                            <option value="Allow">Allow</option>
+                            <option value="Deny URL">Deny URL</option>
+                            <option value="Redirect" selected>Redirect</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">{{ _('Redirect URL') }}</label>
+                        <input type="text" class="form-control form-control-sm" name="redirect_url" placeholder="{{ _('e.g., /new-page') }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">{{ _('Status Code') }}</label>
+                        <select class="form-select form-select-sm" name="redirect_status_code">
+                            <option value="301">301</option>
+                            <option value="302" selected>302</option>
+                            <option value="303">303</option>
+                            <option value="307">307</option>
+                            <option value="308">308</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> {{ _('Create Rule') }}</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#addUrlAccessRule">{{ _('Cancel') }}</button>
+                    <span class="field-status ms-2"></span>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Raw Application Data -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#rawData" role="button">
+                <i class="bi bi-code-slash"></i> {{ _('Raw API Data') }}
+            </a>
+        </h5>
+        {% if view_curl %}{{ api_curl_button('viewCurlModal') }}{% endif %}
+    </div>
+    <div class="collapse" id="rawData">
+        <div class="card-body">
+            <pre class="mb-0 bg-light p-3 rounded" style="max-height: 500px; overflow-y: auto;"><code>{{ application|tojson(indent=2) }}</code></pre>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if view_curl %}{{ api_curl_modal('viewCurlModal', view_curl) }}{% endif %}
+
+{{ help_modal('appViewHelpModal', _('Application Details Help'), '
+<h6>' ~ _('Server Configuration') ~ '</h6>
+<p>' ~ _('Expand a server to edit its host, port, protocol, SSL settings, health checks, and advanced options. Changes are saved via the import API.') ~ '</p>
+<h6>' ~ _('Endpoint / TLS Configuration') ~ '</h6>
+<p>' ~ _('Edit frontend TLS versions, cipher suites, and port settings. TLS 1.0 should be disabled for security; TLS 1.3 and PFS are recommended.') ~ '</p>
+<h6>' ~ _('Additional Actions') ~ '</h6>
+<ul>
+    <li><strong>' ~ _('Security') ~ '</strong> — ' ~ _('View and edit WAF protection mode, request limits, and other security settings') ~ '</li>
+    <li><strong>' ~ _('Traffic Rewrites') ~ '</strong> — ' ~ _('Add request/response header rewrites, URL rewrites, body search-and-replace, and URL translations without touching your origin') ~ '</li>
+    <li><strong>' ~ _('Response Pages') ~ '</strong> — ' ~ _('Paste HTML directly to customise block, CAPTCHA, and error pages — no JSON conversion required') ~ '</li>
+    <li><strong>' ~ _('Clone') ~ '</strong> — ' ~ _('Create a copy of this application with the same configuration') ~ '</li>
+    <li><strong>' ~ _('DNS') ~ '</strong> — ' ~ _('View CNAME and DNS info for this application') ~ '</li>
+    <li><strong>' ~ _('Browse') ~ '</strong> — ' ~ _('Open the application through the WaaS proxy') ~ '</li>
+</ul>
+<p><a href="' ~ url_for('help.applications') ~ '">' ~ _('Full application documentation') ~ ' &rarr;</a></p>
+') }}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var csrfToken = document.querySelector('meta[name="csrf-token"]');
+    var csrf = csrfToken ? csrfToken.getAttribute('content') : '';
+
+    function ajaxPost(url, data, statusEl) {
+        if (statusEl) statusEl.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+        var bodyStr = JSON.stringify(data);
+        console.group('[ajaxPost] ' + url);
+        console.log('Request payload:', data);
+        console.log('Request body:', bodyStr);
+        return fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrf,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: bodyStr
+        })
+        .then(function(r) {
+            console.log('Response status:', r.status, r.statusText);
+            console.log('Response headers:', [...r.headers.entries()]);
+            return r.text();
+        })
+        .then(function(text) {
+            console.log('Response body (raw):', text.substring(0, 2000));
+            if (text.length > 2000) console.log('... (' + text.length + ' bytes total)');
+            console.groupEnd();
+            var resp;
+            try {
+                resp = JSON.parse(text);
+            } catch(e) {
+                console.error('JSON parse failed:', e.message, 'First 200 chars:', text.substring(0, 200));
+                throw e;
+            }
+            if (resp.api) {
+                console.log('%cWaaS API: ' + (resp.api.version || '?') + ' ' + (resp.api.method || '?') + ' ' + (resp.api.path || '?'),
+                    'color: ' + (resp.success ? 'green' : 'red') + '; font-weight: bold');
+                if (resp.api.status) console.log('WaaS API status:', resp.api.status);
+                if (resp.api.response) console.log('WaaS API response:', resp.api.response);
+            }
+            if (resp.success) {
+                if (statusEl) statusEl.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
+                if (window.showToast) window.showToast('Saved successfully.', 'success');
+                setTimeout(function() { location.reload(); }, 1200);
+            } else {
+                if (statusEl) statusEl.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+                if (window.showToast) window.showToast(resp.error || 'Save failed.', 'danger');
+            }
+        })
+        .catch(function(err) {
+            console.groupEnd();
+            if (statusEl) statusEl.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+            if (window.showToast) window.showToast('Network error: ' + err.message, 'danger');
+        });
+    }
+
+    // Server edit forms
+    document.querySelectorAll('.server-edit-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var accountId = form.dataset.accountId;
+            var appId = form.dataset.appId;
+            var serverName = form.dataset.serverName;
+            var statusEl = form.querySelector('.field-status');
+            var fields = {};
+
+            form.querySelectorAll('input, select').forEach(function(el) {
+                var name = el.name;
+                if (!name) return;
+                var value;
+                if (el.type === 'checkbox') {
+                    value = el.checked;
+                } else if (el.type === 'number') {
+                    value = el.value !== '' ? parseInt(el.value, 10) : null;
+                } else {
+                    value = el.value;
+                }
+                // Handle nested fields like "ssl.enable_http2"
+                var parts = name.split('.');
+                if (parts.length === 2) {
+                    if (!fields[parts[0]]) fields[parts[0]] = {};
+                    fields[parts[0]][parts[1]] = value;
+                } else {
+                    fields[name] = value;
+                }
+            });
+
+            ajaxPost('/applications/' + accountId + '/' + appId + '/servers/update',
+                { server_name: serverName, fields: fields }, statusEl);
+        });
+    });
+
+    // Port edit forms
+    document.querySelectorAll('.port-edit-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var accountId = form.dataset.accountId;
+            var appId = form.dataset.appId;
+            var port = parseInt(form.dataset.port, 10);
+            var statusEl = form.querySelector('.field-status');
+            var data = { port: port };
+
+            form.querySelectorAll('input[type="checkbox"]').forEach(function(el) {
+                data[el.name] = el.checked;
+            });
+
+            ajaxPost('/applications/' + accountId + '/' + appId + '/endpoints/update',
+                { section: 'ports', data: data }, statusEl);
+        });
+    });
+
+    // TLS edit form
+    document.querySelectorAll('.tls-edit-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var accountId = form.dataset.accountId;
+            var appId = form.dataset.appId;
+            var statusEl = form.querySelector('.field-status');
+            var data = {};
+
+            form.querySelectorAll('input[type="checkbox"]').forEach(function(el) {
+                data[el.name] = el.checked;
+            });
+            form.querySelectorAll('select').forEach(function(el) {
+                data[el.name] = el.value;
+            });
+
+            ajaxPost('/applications/' + accountId + '/' + appId + '/endpoints/update',
+                { section: 'tls', data: data }, statusEl);
+        });
+    });
+
+    // URL Access Rule — Create
+    document.querySelectorAll('.url-rule-create-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var accountId = form.dataset.accountId;
+            var appId = form.dataset.appId;
+            var statusEl = form.querySelector('.field-status');
+            var data = {};
+
+            form.querySelectorAll('input, select').forEach(function(el) {
+                if (el.name) data[el.name] = el.value;
+            });
+
+            ajaxPost('/applications/' + accountId + '/' + appId + '/url-access-rules/create', data, statusEl);
+        });
+    });
+
+    // URL Access Rule — Edit
+    document.querySelectorAll('.url-rule-edit-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var accountId = form.dataset.accountId;
+            var appId = form.dataset.appId;
+            var ruleName = form.dataset.ruleName;
+            var statusEl = form.querySelector('.field-status');
+            var fields = {};
+
+            form.querySelectorAll('input, select').forEach(function(el) {
+                if (el.name) fields[el.name] = el.value;
+            });
+
+            ajaxPost('/applications/' + accountId + '/' + appId + '/url-access-rules/update',
+                { rule_name: ruleName, fields: fields }, statusEl);
+        });
+    });
+
+    // URL Access Rule — Delete
+    document.querySelectorAll('.btn-delete-url-rule').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var ruleName = btn.dataset.ruleName;
+            var accountId = btn.dataset.accountId;
+            var appId = btn.dataset.appId;
+            (window.confirmAction || function(m) { return Promise.resolve(confirm(m)); })(
+                '{{ _("Delete URL access rule") }} "' + ruleName + '"?'
+            ).then(function(ok) {
+                if (!ok) return;
+                ajaxPost('/applications/' + accountId + '/' + appId + '/url-access-rules/delete',
+                    { rule_name: ruleName }, null);
+            });
+        });
+    });
+})();
+</script>
+{% endblock %}

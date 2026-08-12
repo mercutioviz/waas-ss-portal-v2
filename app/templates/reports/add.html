@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field, render_submit %}
+{% block title %}{{ _('Add Report') }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Reports'), url_for('reports.list_reports')),
+    (_('Add Report'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-plus-circle"></i> {{ _('Add Scheduled Report') }}</h2>
+    <a href="{{ url_for('reports.list_reports') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" class="needs-validation" novalidate data-loading="{{ _('Saving report...') }}">
+                    {{ form.hidden_tag() }}
+                    {{ render_field(form.name) }}
+                    <div class="row">
+                        <div class="col-md-6">
+                            {{ render_field(form.account_id) }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ render_field(form.report_type) }}
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4">
+                            {{ render_field(form.frequency) }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ render_field(form.day_of_week, help=_('Used for weekly reports')) }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ render_field(form.hour, help=_('UTC time')) }}
+                        </div>
+                    </div>
+                    {{ render_field(form.recipients, help=_('Separate multiple emails with commas')) }}
+                    {{ render_submit(form, cancel_url=url_for('reports.list_reports')) }}
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><h6 class="mb-0">{{ _('Report Types') }}</h6></div>
+            <div class="card-body small">
+                <p><strong>{{ _('WAF Summary') }}</strong>: {{ _('Top attacks, source IPs, severity breakdown from WAF logs.') }}</p>
+                <p><strong>{{ _('Access Summary') }}</strong>: {{ _('Request totals, top URLs, HTTP status code distribution.') }}</p>
+                <p class="mb-0"><strong>{{ _('Security Overview') }}</strong>: {{ _('Current protection mode and security settings for all apps.') }}</p>
+            </div>
+        </div>
+        <div class="card mt-3" id="schedulePreview" style="display:none">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-calendar-event"></i> {{ _('Next 3 Runs') }}</h6></div>
+            <div class="card-body small p-0">
+                <ul class="list-group list-group-flush" id="previewList"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var freq = document.getElementById('frequency');
+    var dow = document.getElementById('day_of_week');
+    if (!freq || !dow) return;
+    var dowWrap = dow.closest('.mb-3') || dow.parentElement;
+    function toggle() { dowWrap.style.display = freq.value === 'weekly' ? '' : 'none'; updatePreview(); }
+    freq.addEventListener('change', toggle);
+    toggle();
+
+    var hour = document.getElementById('hour');
+    var preview = document.getElementById('schedulePreview');
+    var previewList = document.getElementById('previewList');
+
+    [freq, dow, hour].forEach(function(el) {
+        if (el) el.addEventListener('change', updatePreview);
+    });
+
+    function updatePreview() {
+        var f = freq.value, h = parseInt(hour.value) || 0, d = parseInt(dow.value) || 0;
+        var now = new Date();
+        var runs = [], candidate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), h));
+        for (var i = 0; i < 60 && runs.length < 3; i++) {
+            candidate.setUTCDate(candidate.getUTCDate() + 1);
+            if (f === 'daily') { runs.push(new Date(candidate)); }
+            else if (f === 'weekly' && candidate.getUTCDay() === ((d + 1) % 7)) { runs.push(new Date(candidate)); }
+            else if (f === 'monthly' && candidate.getUTCDate() === 1) { runs.push(new Date(candidate)); }
+        }
+        if (runs.length) {
+            previewList.innerHTML = runs.map(function(r) {
+                return '<li class="list-group-item py-1 px-3">' + r.toUTCString().replace(' GMT','') + ' UTC</li>';
+            }).join('');
+            preview.style.display = '';
+        } else {
+            preview.style.display = 'none';
+        }
+    }
+    updatePreview();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help: Logs') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('help.index') }}">{{ _('Help') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Logs') }}</li>
+    </ol>
+</nav>
+
+<h2 class="mt-3 mb-4"><i class="bi bi-journal-text"></i> {{ _('Log Analysis') }}</h2>
+
+<div class="row g-4">
+<div class="col-lg-8">
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('WAF Logs') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('WAF (Web Application Firewall) logs show security events — attacks detected and actions taken. Each entry includes:') }}</p>
+            <ul>
+                <li>{{ _('Attack type (SQL injection, XSS, etc.)') }}</li>
+                <li>{{ _('Source IP address') }}</li>
+                <li>{{ _('Requested URL') }}</li>
+                <li>{{ _('Action taken (blocked, logged, captcha)') }}</li>
+                <li>{{ _('Severity and confidence scores') }}</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Access Logs') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Access logs show all HTTP requests processed by the WAF, similar to traditional web server access logs. Useful for traffic analysis and debugging.') }}</p>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('False Positive Analysis') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('The false positive analysis tool helps identify WAF rules that may be incorrectly blocking legitimate traffic.') }}</p>
+            <p>{{ _('It analyzes blocked requests and groups them by attack type and URL pattern to help you decide which rules to tune.') }}</p>
+            <div class="alert alert-info mb-0">
+                <i class="bi bi-lightbulb"></i> {{ _('Tip: Run false positive analysis in Passive mode before switching to Active. This shows what would be blocked without actually blocking traffic.') }}
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Filtering') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('All log views support filtering by:') }}</p>
+            <ul>
+                <li>{{ _('Time range (last hour, day, week, custom)') }}</li>
+                <li>{{ _('Application name') }}</li>
+                <li>{{ _('Attack type / HTTP status code') }}</li>
+                <li>{{ _('Source IP address') }}</li>
+            </ul>
+        </div>
+    </div>
+</div>
+</div>
+{% endblock %}

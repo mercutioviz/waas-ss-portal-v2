@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ _('New Template') }} - {{ _('Config Templates') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('templates.list_templates') }}">{{ _('Config Templates') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('New Template') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-4">
+    <h2><i class="bi bi-plus-circle"></i> {{ _('New Config Template') }}</h2>
+</div>
+
+{% set cancel_url = url_for('templates.list_templates') %}
+{% include "templates/_form.html" %}
+{% endblock %}

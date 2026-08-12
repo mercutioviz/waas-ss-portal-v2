@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help: Templates') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('help.index') }}">{{ _('Help') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Templates') }}</li>
+    </ol>
+</nav>
+
+<h2 class="mt-3 mb-4"><i class="bi bi-file-earmark-code"></i> {{ _('Configuration Templates') }}</h2>
+
+<div class="row g-4">
+<div class="col-lg-8">
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Creating Templates') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Templates store reusable security and server configurations. Two ways to create them:') }}</p>
+            <ul>
+                <li><strong>{{ _('From scratch') }}</strong> — {{ _('Create a blank template and edit the JSON config directly') }}</li>
+                <li><strong>{{ _('From an application') }}</strong> — {{ _('Export a live app\'s config as a template (select which sections to include)') }}</li>
+            </ul>
+            <p class="mb-0">{{ _('Admins can mark templates as Global to share them with all users.') }}</p>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Applying Templates') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Templates can be applied to individual applications or in bulk:') }}</p>
+            <ul>
+                <li><strong>{{ _('Single apply') }}</strong> — {{ _('From the template view, select an application to apply to') }}</li>
+                <li><strong>{{ _('Bulk apply') }}</strong> — {{ _('Select multiple applications across accounts to apply the template at once') }}</li>
+            </ul>
+            <div class="alert alert-warning mb-0">
+                <i class="bi bi-exclamation-triangle"></i> {{ _('Applying a template overwrites the target application\'s configuration for the sections included in the template.') }}
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Import / Export') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Templates can be exported as JSON files and imported on another instance or shared with colleagues.') }}</p>
+            <p class="mb-0">{{ _('The exported file contains the template name, description, and full configuration data.') }}</p>
+        </div>
+    </div>
+</div>
+</div>
+{% endblock %}

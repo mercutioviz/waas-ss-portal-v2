@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "macros/api_curl_modal.html" import api_curl_button, api_curl_modal %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field %}
+{% block title %}{{ _('Create Application') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Applications'), url_for('applications.list_applications')),
+    (account.account_name, url_for('applications.list_applications', account_id=account.id)),
+    (_('Create'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-7">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2><i class="bi bi-plus-circle"></i> {{ _('Create Application') }} <a href="{{ url_for('help.applications') }}" class="text-muted small ms-1" data-bs-toggle="tooltip" title="{{ _('Open help') }}" aria-label="{{ _('Help') }}"><i class="bi bi-question-circle"></i></a></h2>
+            <a href="{{ url_for('applications.list_applications', account_id=account.id) }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+        </div>
+
+        <div class="alert alert-info py-2 small">
+            <i class="bi bi-info-circle"></i>
+            {{ _('Creating application on account') }} <strong>{{ account.account_name }}</strong> {{ _('via') }}
+            <span class="badge bg-warning text-dark">v2 API</span>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Application Details') }}</h5></div>
+            <div class="card-body">
+                <form method="POST" data-loading="{{ _('Creating application...') }}">
+                    {{ form.hidden_tag() }}
+
+                    {{ render_field(form.application_name, help=_('A descriptive name for this application.')) }}
+                    {{ render_field(form.hostname, help=_('The public domain that users access (e.g., www.example.com).')) }}
+
+                    <hr>
+                    <h6 class="text-muted mb-3">{{ _('Backend Server') }}</h6>
+
+                    {{ render_field(form.backend_ip, help=_('The origin server IP or hostname that WaaS will proxy to.')) }}
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            {{ render_field(form.backend_port) }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ render_field(form.backend_type) }}
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h6 class="text-muted mb-3">{{ _('Security & Endpoints') }}</h6>
+
+                    {{ render_field(form.malicious_traffic, help='<strong><abbr data-bs-toggle="tooltip" title="'~_('Monitor-only mode — logs threats without blocking traffic')~'">Passive</abbr></strong> '~_('monitors and logs threats without blocking.')~' <strong><abbr data-bs-toggle="tooltip" title="'~_('Enforcement mode — blocks malicious requests in real time')~'">Active</abbr></strong> '~_('blocks malicious requests.')~' '~_('Start with Passive to avoid false positives.')) }}
+
+                    <div class="card bg-light mb-3">
+                        <div class="card-body py-2">
+                            <div class="form-check mb-2">
+                                {{ form.use_https() }}
+                                <label class="form-check-label" for="use_https">{{ _('Create HTTPS endpoint (port 443)') }}</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                {{ form.use_http() }}
+                                <label class="form-check-label" for="use_http">{{ _('Create HTTP endpoint (port 80)') }}</label>
+                            </div>
+                            <div class="form-check">
+                                {{ form.redirect_http() }}
+                                <label class="form-check-label" for="redirect_http">{{ _('Redirect HTTP to HTTPS') }}</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 align-items-center mt-4">
+                        {{ form.submit() }}
+                        <a href="{{ url_for('applications.list_applications', account_id=account.id) }}" class="btn btn-outline-secondary">{{ _('Cancel') }}</a>
+                        {% if create_curl %}{{ api_curl_button('createCurlModal') }}{% endif %}
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% if create_curl %}{{ api_curl_modal('createCurlModal', create_curl) }}{% endif %}
+{% endblock %}

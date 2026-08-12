@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Notifications') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Notifications'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-bell"></i> {{ _('Notifications') }}</h5>
+                {% if notifications %}
+                <form method="post" action="{{ url_for('auth.notification_mark_all_read') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-check-all"></i> {{ _('Mark All Read') }}</button>
+                </form>
+                {% endif %}
+            </div>
+            <div class="list-group list-group-flush">
+                {% if notifications %}
+                    {% for n in notifications %}
+                    <div class="list-group-item {% if not n.is_read %}list-group-item-light{% endif %}" id="notif-{{ n.id }}">
+                        <div class="d-flex w-100 justify-content-between align-items-start">
+                            <div>
+                                <div class="d-flex align-items-center mb-1">
+                                    {% if n.type == 'report' %}
+                                    <i class="bi bi-calendar-check text-primary me-2"></i>
+                                    {% elif n.type == 'cert_expiry' %}
+                                    <i class="bi bi-exclamation-triangle text-warning me-2"></i>
+                                    {% else %}
+                                    <i class="bi bi-info-circle text-info me-2"></i>
+                                    {% endif %}
+                                    <strong>{{ n.title }}</strong>
+                                    {% if not n.is_read %}
+                                    <span class="badge bg-primary ms-2">{{ _('New') }}</span>
+                                    {% endif %}
+                                </div>
+                                <p class="mb-1 text-muted small">{{ n.message }}</p>
+                                {% if n.link %}
+                                <a href="{{ n.link }}" class="small">{{ _('View details') }} &rarr;</a>
+                                {% endif %}
+                            </div>
+                            <div class="text-end text-nowrap ms-3">
+                                <small class="text-muted">{{ n.created_at|datetime_format }}</small>
+                                {% if not n.is_read %}
+                                <br>
+                                <button class="btn btn-sm btn-link p-0 mt-1 mark-read-btn" data-id="{{ n.id }}"><small>{{ _('Mark read') }}</small></button>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="list-group-item text-center text-muted py-5">
+                        <i class="bi bi-bell-slash fs-1 d-block mb-2"></i>
+                        {{ _('No notifications yet.') }}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.querySelectorAll('.mark-read-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var id = this.dataset.id;
+        var csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        fetch('/auth/notifications/read/' + id, {
+            method: 'POST',
+            headers: {'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': csrfToken}
+        }).then(function(resp) {
+            if (resp.ok) {
+                var item = document.getElementById('notif-' + id);
+                if (item) {
+                    item.classList.remove('list-group-item-light');
+                    var badge = item.querySelector('.badge');
+                    if (badge) badge.remove();
+                    btn.remove();
+                }
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

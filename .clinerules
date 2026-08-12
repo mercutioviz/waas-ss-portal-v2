@@ -1,0 +1,277 @@
+# WaaS Self-Service Portal - Cline Rules
+
+## Project Overview
+This is a Flask-based web portal for managing Barracuda Web Application and API Security (WaaS) resources. Users can register WaaS API accounts, then browse and manage applications, certificates, proxy settings, and security logs through a web UI that wraps the WaaS REST API.
+
+- **Name:** WaaS Self-Service Portal (waas-ss-portal)
+- **Framework:** Flask 3.1 with Python 3.13
+- **Database:** SQLite via Flask-SQLAlchemy (file: `instance/waas-portal.db`)
+- **Auth:** Flask-Login with password hashing (Werkzeug)
+- **Forms:** Flask-WTF / WTForms with CSRF protection
+- **Frontend:** Bootstrap 5.3.3, Bootstrap Icons 1.11.3, custom CSS/JS
+- **API Client:** Custom `WaasClient` class wrapping the Barracuda WaaS REST API via `requests`
+- **Encryption:** Fernet (cryptography lib) for encrypting stored API keys at rest
+
+## Architecture
+
+### Application Factory Pattern
+- `app/__init__.py` contains `create_app()` which initializes extensions, registers blueprints, and sets up template filters
+- Config is loaded from `config.py` using a config dictionary keyed by environment name (default, development, production, testing)
+- Extensions (`db`, `login_manager`) are instantiated at module level and initialized with `init_app()` inside the factory
+
+### Blueprint Structure
+All routes are organized as Flask Blueprints in `app/routes/`:
+| Blueprint | Prefix | Purpose |
+|-----------|--------|---------|
+| `main` | `/` | Landing page, dashboard |
+| `auth` | `/auth` | Login, logout, profile, change password |
+| `admin` | `/admin` | Admin dashboard, user CRUD, audit log |
+| `accounts` | `/accounts` | WaaS API account management (add, edit, view, verify, delete) |
+| `applications` | `/applications` | Browse WaaS applications per account |
+| `certificates` | `/certificates` | Browse/upload WaaS certificates per account |
+| `logs` | `/logs` | WAF logs, access logs, false positive analysis |
+| `proxy` | `/proxy` | Proxy/backend settings per application |
+
+### Key Patterns
+- Every route blueprint is in its own file with `bp = Blueprint(...)` and routes use `@bp.route()`
+- Blueprints are imported and registered in `app/__init__.py`
+- All authenticated routes use `@login_required` decorator
+- Admin-only routes additionally use `@admin_required` (custom decorator in `app/routes/admin.py`)
+- Significant user actions are recorded via `AuditLog.log()` (see Models section)
+
+## File Organization
+```
+waas-ss-portal/
+├── config.py              # Config classes (Dev, Prod, Testing)
+├── requirements.txt       # Python dependencies (pinned versions)
+├── run.py                 # Entry point with CLI commands (init-db, create-admin, seed)
+├── app/
+│   ├── __init__.py        # App factory, extension init, template filters
+│   ├── models.py          # SQLAlchemy models (User, WaasAccount, AuditLog, SystemSettings)
+│   ├── forms.py           # WTForms form classes
+│   ├── encryption.py      # Fernet encrypt/decrypt helpers
+│   ├── waas_client.py     # WaaS API client class
+│   ├── routes/            # Blueprint modules (one per feature area)
+│   ├── templates/         # Jinja2 templates organized by blueprint name
+│   │   ├── base.html      # Master layout (navbar, flash messages, footer)
+│   │   ├── dashboard.html
+│   │   ├── auth/          # login.html, profile.html, change_password.html
+│   │   ├── accounts/      # list.html, add.html, edit.html, view.html
+│   │   ├── admin/         # index.html, users.html, user_create.html, user_edit.html, audit_log.html
+│   │   ├── applications/  # list.html, view.html
+│   │   ├── certificates/  # list.html, view.html
+│   │   ├── logs/          # index.html
+│   │   └── proxy/         # view.html
+│   └── static/
+│       ├── css/style.css  # Custom styles
+│       └── js/app.js      # Custom JavaScript
+├── instance/              # SQLite database (gitignored)
+├── uploads/               # Certificate uploads (gitignored)
+└── venv/                  # Virtual environment (gitignored)
+```
+
+## Models (app/models.py)
+
+### User
+- Fields: `id`, `username`, `email`, `password_hash`, `first_name`, `last_name`, `role`, `is_active`, `created_at`, `last_login`, `login_count`, `failed_login_attempts`, `last_failed_login`
+- **IMPORTANT:** `display_name` is a **read-only @property** (computed from first_name/last_name/username). Never use it as a constructor argument or try to set it directly.
+- Roles: `admin`, `user`, `viewer`
+- Methods: `set_password()`, `check_password()`, `is_admin` (property), `to_dict()`
+
+### WaasAccount
+- Fields: `id`, `user_id` (FK), `account_name`, `api_key_encrypted`, `waas_account_id`, `is_active`, `last_verified`, `created_at`, `updated_at`
+- v2 credential fields: `waas_email_encrypted`, `waas_password_encrypted`
+- v2 token cache fields: `v2_auth_token_encrypted`, `v2_token_expiry`
+- `api_key` is a property that encrypts/decrypts via `app/encryption.py` (nullable — not required if v2 creds provided)
+- `waas_email`, `waas_password`, `v2_auth_token` are similarly encrypted properties
+- Helper properties: `has_api_key`, `has_v2_credentials`, `v2_token_valid`
+- At least one credential type is required: API key **or** email+password (or both)
+- API key is the default auth method; v2 email/password enables verification and v2 API features
+- Has NO `description` field
+
+### AuditLog
+- Fields: `id`, `user_id` (FK), `action`, `resource_type`, `resource_id`, `details`, `ip_address`, `user_agent`, `timestamp`
+- **IMPORTANT:** The datetime field is `timestamp`, NOT `created_at`
+- Static method `AuditLog.log()` is the standard way to create entries
+
+### SystemSettings
+- Key-value store for app-wide settings with type coercion (string, bool, int, json)
+
+## Forms (app/forms.py)
+
+### Form-Template Consistency Rules
+- **Every `form.field_name` referenced in a template MUST exist as a field on the corresponding form class**
+- **Every form field used in a template must match the exact field name** (e.g., `new_password_confirm` not `confirm_password`)
+- When adding a new form field, update both `forms.py` AND the template(s) that use it
+- When removing a form field, check ALL templates that reference it
+
+### Current Forms
+| Form | Used In |
+|------|---------|
+| `LoginForm` | `auth/login.html` |
+| `RegistrationForm` | Admin user registration |
+| `ChangePasswordForm` | `auth/change_password.html` |
+| `WaasAccountForm` | `accounts/add.html`, `accounts/edit.html` |
+| `UserCreateForm` | `admin/user_create.html` |
+| `UserEditForm` | `admin/user_edit.html` |
+| `CertificateUploadForm` | Certificate upload flow |
+
+## Template Conventions
+
+### Layout
+- All templates extend `base.html` using `{% extends "base.html" %}`
+- Override `{% block title %}` for page title and `{% block content %}` for body
+- `base.html` provides: navbar, flash message rendering, Bootstrap/icon CDN links, footer
+
+### Styling
+- Use Bootstrap 5.3 classes for layout and components
+- Use Bootstrap Icons (`bi bi-*`) for icons
+- Cards (`<div class="card">`) are the primary content container
+- Tables use `table table-hover` with `table-light` header
+- Custom styles go in `app/static/css/style.css`
+
+### Forms in Templates
+- Use `{{ form.hidden_tag() }}` for CSRF token
+- For form fields, either use `{{ form.field_name(class="form-control") }}` or render with explicit labels
+- Error display pattern: `{% for error in form.field_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}`
+
+### CSRF for Non-Form POST Actions
+For buttons/forms that don't use WTForms (e.g., delete/toggle buttons):
+```html
+<form method="POST" action="{{ url_for('...') }}" class="d-inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Delete</button>
+</form>
+```
+
+### Template Filters
+- `datetime_format` — Formats datetime objects (registered in `app/__init__.py`)
+- `filesizeformat` — Human-readable file sizes
+
+## Route Patterns
+
+### Account-Scoped Resources
+Applications, certificates, logs, and proxy settings are all scoped to a WaaS account:
+- List pages show an account selector first, then load data for the selected account
+- `account_id` is passed as a query parameter for list views: `?account_id=N`
+- `account_id` is a URL path parameter for detail views: `/<int:account_id>/<resource_id>`
+
+### Helper Pattern for Account Access
+Routes that need API access use a helper like `get_client_for_account(account_id)`:
+- Verifies the account belongs to `current_user`
+- Returns a `(WaasClient, account)` tuple or aborts with 404
+- This pattern is used in applications, certificates, logs, and proxy routes
+
+### Standard Route Actions
+| Action | Method | URL Pattern |
+|--------|--------|-------------|
+| List | GET | `/` |
+| Add/Create | GET, POST | `/add` or `/create` |
+| View | GET | `/<int:id>` |
+| Edit | GET, POST | `/<int:id>/edit` |
+| Delete | POST | `/<int:id>/delete` |
+| Verify | POST | `/<int:id>/verify` |
+
+### POST-Only Routes
+Delete, verify, and toggle actions must be POST-only (not GET links). Use form-based buttons in templates.
+
+## WaaS API Integration (app/waas_client.py)
+
+### Dual API Versions (v2 and v4)
+The Barracuda WaaS platform exposes **two API versions**. Most functionality is on v4, but a few endpoints are only available via v2.
+
+| API Version | Base URL | Config Key | Used For |
+|-------------|----------|------------|----------|
+| **v4** (primary) | `https://api.waas.barracudanetworks.com/v4/waasapi` | `WAAS_API_BASE_URL` | Applications, certificates, logs, proxy, security config |
+| **v2** (legacy) | `https://api.waas.barracudanetworks.com/v2/waasapi` | `WAAS_API_V2_BASE_URL` | Account info / verification (`GET /accounts/`) |
+
+Both base URLs are configured in `config.py` and can be overridden via environment variables.
+
+### v2 Account Info Response Format
+`GET /v2/waasapi/accounts/` returns:
+```json
+{
+  "accounts": [{"id": 10987394, "name": "...", "admin": true, "has_license": true}],
+  "user": "user@example.com",
+  "user_id": 189381282,
+  "name": "Full Name",
+  "serial": "BAR-WF-DEV",
+  "build": "WAFaaS 2024.1"
+}
+```
+The portal stores `accounts[0]['id']` as `WaasAccount.waas_account_id`.
+
+### v2 Authentication Flow
+The v2 API uses a different auth mechanism than v4:
+1. **Login:** `POST /v2/waasapi/api_login/` with form-urlencoded `email` + `password`
+2. **Response:** `{"key": "<auth_token>", "expiry": <unix_timestamp>}`
+3. **Usage:** The returned `key` is used as `auth-api: <key>` header for subsequent v2 requests
+
+### Auth Header Differences
+| API Version | Header Format | Example |
+|-------------|---------------|---------|
+| **v4** | `Authorization: Bearer <api_key>` | `Authorization: Bearer 741.abc123...` |
+| **v2** | `auth-api: <token>` | `auth-api: eyJhY2NfaW...` |
+
+**IMPORTANT:** v2 does NOT use `Authorization: Bearer`. Using the wrong header format will result in 403/500 errors.
+
+The auth token and expiry are cached (encrypted) on the `WaasAccount` model. Before each request, the client checks if the token is still valid; if expired, it re-authenticates automatically.
+
+### WaasClient Class
+- **`WaasClient(api_key)`** — create with an explicit auth token
+- **`WaasClient.from_account(account)`** — factory that picks the best auth method:
+  - If `account.has_api_key` → uses the API key directly
+  - Elif `account.has_v2_credentials` → obtains/refreshes v2 auth token
+- **`WaasClient.v2_login(email, password)`** — static method for v2 login
+- Holds both `base_url` (v4) and `base_url_v2` (v2)
+- All API calls go through `_make_request()` which accepts an `api_version` parameter (`'v4'` default, or `'v2'`)
+- `_ensure_auth()` is called before every request to auto-refresh expired v2 tokens
+- Errors are raised as `WaasApiError` exceptions
+- When API calls fail during account operations, the app gracefully handles the error (saves account, warns user)
+- **When adding new endpoints:** if the endpoint is v2-only, pass `api_version='v2'` to `_make_request()`
+
+### Error Handling Pattern
+```python
+try:
+    client = WaasClient(account.api_key)
+    result = client.some_method()
+except WaasApiError as e:
+    flash(f'API error: {e}', 'danger')
+```
+
+## Security Practices
+- All passwords hashed with Werkzeug's `generate_password_hash` / `check_password_hash`
+- WaaS API keys encrypted at rest using Fernet symmetric encryption
+- CSRF protection enabled globally via Flask-WTF
+- `@login_required` on all authenticated routes
+- `@admin_required` on all admin routes
+- Users can only access their own WaaS accounts (`filter_by(user_id=current_user.id)`)
+- Audit logging for significant actions (account add/edit/delete, user create/edit/toggle)
+
+## Development & Running
+
+### Setup
+```bash
+cd /home/admin/waas-ss-portal
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python3 run.py
+```
+
+### Default Admin
+- On first run, `run.py` auto-creates tables and seeds an admin user: `admin` / `admin`
+- CLI commands: `flask init-db`, `flask create-admin`, `flask seed`
+
+### Environment
+- Dev server runs on `0.0.0.0:5000` with debug mode
+- `FLASK_DEBUG=1` enables auto-reload and debugger
+- Secret key and encryption key are set in config (override via environment variables in production)
+
+## Common Pitfalls (Lessons Learned)
+1. **`display_name` is a property, not a column** — Use `first_name`/`last_name` for setting, `display_name` only for reading
+2. **`AuditLog.timestamp`** — The datetime column is `timestamp`, not `created_at`
+3. **Form-template field name mismatches** — Always verify form field names match template references exactly
+4. **POST-only routes** — Verify/delete/toggle routes must use POST method; link them with form buttons, not `<a>` tags
+5. **Account ownership** — Always filter by `user_id=current_user.id` when querying WaasAccount
+6. **API key handling** — Use the `api_key` property (encrypts/decrypts automatically); never read `api_key_encrypted` directly

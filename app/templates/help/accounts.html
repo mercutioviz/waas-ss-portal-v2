@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help: Accounts') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('help.index') }}">{{ _('Help') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Accounts') }}</li>
+    </ol>
+</nav>
+
+<h2 class="mt-3 mb-4"><i class="bi bi-key"></i> {{ _('Account Management') }}</h2>
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">{{ _('API Key (v4) vs v2 Credentials') }}</h5></div>
+            <div class="card-body">
+                <p>{{ _('WaaS supports two authentication methods. You need at least one:') }}</p>
+                <table class="table">
+                    <thead><tr><th>{{ _('Method') }}</th><th>{{ _('Used For') }}</th><th>{{ _('Required?') }}</th></tr></thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>{{ _('API Key (v4)') }}</strong></td>
+                            <td>{{ _('Viewing applications, certificates, logs, security config, proxy settings') }}</td>
+                            <td>{{ _('Recommended') }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>{{ _('Email + Password (v2)') }}</strong></td>
+                            <td>{{ _('Account verification, creating/deleting applications, cloning') }}</td>
+                            <td>{{ _('Optional — needed for write operations') }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="alert alert-info mb-0">
+                    <i class="bi bi-info-circle"></i> {{ _('For full functionality, add both an API key and v2 credentials. All credentials are encrypted at rest.') }}
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">{{ _('Account Verification') }}</h5></div>
+            <div class="card-body">
+                <p>{{ _('Verification confirms your credentials are valid by authenticating with the WaaS API. It requires v2 credentials (email + password).') }}</p>
+                <p>{{ _('Once verified, the account is marked as active and a WaaS account ID is stored for reference.') }}</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">{{ _('Sharing Accounts') }}</h5></div>
+            <div class="card-body">
+                <p>{{ _('Account owners can share access with other portal users. Three permission levels are available:') }}</p>
+                <ul>
+                    <li><strong>{{ _('Read') }}</strong> — {{ _('View applications, certificates, logs') }}</li>
+                    <li><strong>{{ _('Write') }}</strong> — {{ _('All read permissions plus editing configurations') }}</li>
+                    <li><strong>{{ _('Admin') }}</strong> — {{ _('All write permissions plus sharing and account settings') }}</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

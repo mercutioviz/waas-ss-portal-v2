@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help: Certificates') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('help.index') }}">{{ _('Help') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Certificates') }}</li>
+    </ol>
+</nav>
+
+<h2 class="mt-3 mb-4"><i class="bi bi-file-earmark-lock"></i> {{ _('Certificate Management') }}</h2>
+
+<div class="row g-4">
+<div class="col-lg-8">
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Supported Formats') }}</h5></div>
+        <div class="card-body">
+            <table class="table">
+                <thead><tr><th>{{ _('Format') }}</th><th>{{ _('Extension') }}</th><th>{{ _('Notes') }}</th></tr></thead>
+                <tbody>
+                    <tr>
+                        <td><strong>PEM</strong></td>
+                        <td><code>.pem</code>, <code>.crt</code></td>
+                        <td>{{ _('Upload certificate and private key as separate files') }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>PFX/PKCS#12</strong></td>
+                        <td><code>.pfx</code>, <code>.p12</code></td>
+                        <td>{{ _('Single file containing cert + key. Requires the PFX password.') }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('SNI Certificates') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Certificates are uploaded per-application as SNI (Server Name Indication) certificates. This allows multiple SSL certificates on the same IP address.') }}</p>
+            <p class="mb-0">{{ _('Select the target application when uploading. The certificate will be available for that application\'s HTTPS endpoints.') }}</p>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Certificate Expiry') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('The certificate list shows days remaining until expiry. Certificates are color-coded:') }}</p>
+            <ul>
+                <li><span class="badge bg-danger">{{ _('Red') }}</span> — {{ _('Expired or expiring within 7 days') }}</li>
+                <li><span class="badge bg-warning text-dark">{{ _('Yellow') }}</span> — {{ _('Expiring within 30 days') }}</li>
+                <li><span class="badge bg-success">{{ _('Green') }}</span> — {{ _('More than 30 days remaining') }}</li>
+            </ul>
+        </div>
+    </div>
+</div>
+</div>
+{% endblock %}

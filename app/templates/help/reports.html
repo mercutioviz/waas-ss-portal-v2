@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Help: Reports') }} — WaaS Portal{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('help.index') }}">{{ _('Help') }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Reports') }}</li>
+    </ol>
+</nav>
+
+<h2 class="mt-3 mb-4"><i class="bi bi-bar-chart-line"></i> {{ _('Scheduled Reports') }}</h2>
+
+<div class="row g-4">
+<div class="col-lg-8">
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Overview') }}</h5></div>
+        <div class="card-body">
+            <p>{{ _('Scheduled Reports automatically generate and email security summaries on a daily, weekly, or monthly basis. Each report is tied to a specific WaaS account.') }}</p>
+            <p class="mb-0">{{ _('Reports are delivered to one or more email recipients and can also trigger in-app notifications (configurable in your notification preferences).') }}</p>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Report Types') }}</h5></div>
+        <div class="card-body">
+            <table class="table mb-0">
+                <thead><tr><th>{{ _('Type') }}</th><th>{{ _('Contents') }}</th></tr></thead>
+                <tbody>
+                    <tr><td><strong>{{ _('WAF Summary') }}</strong></td><td>{{ _('Top attacks, source IPs, severity breakdown from WAF logs in the reporting period.') }}</td></tr>
+                    <tr><td><strong>{{ _('Access Summary') }}</strong></td><td>{{ _('Request totals, top URLs, HTTP status code distribution.') }}</td></tr>
+                    <tr><td><strong>{{ _('Security Overview') }}</strong></td><td>{{ _('Current protection mode and security settings snapshot for all applications.') }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">{{ _('Schedule Settings') }}</h5></div>
+        <div class="card-body">
+            <ul>
+                <li><strong>{{ _('Daily') }}</strong> — {{ _('Runs every day at the specified hour (UTC).') }}</li>
+                <li><strong>{{ _('Weekly') }}</strong> — {{ _('Runs once per week on the chosen day at the specified hour.') }}</li>
+                <li><strong>{{ _('Monthly') }}</strong> — {{ _('Runs on the 1st of each month at the specified hour.') }}</li>
+            </ul>
+            <p class="mb-0">{{ _('All schedule times are in UTC. Recipients receive the report via email once the run completes.') }}</p>
+        </div>
+    </div>
+</div>
+</div>
+{% endblock %}

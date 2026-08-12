@@ -1,0 +1,43 @@
+{% extends "email/report_base.html" %}
+{% block report_content %}
+<div class="stat-row">
+    <div class="stat">
+        <h2>{{ summary.get('app_count', 0) }}</h2>
+        <p>Applications</p>
+    </div>
+</div>
+
+{% if summary.get('protection_modes') %}
+<h3>Protection Modes</h3>
+<p>
+{% for mode, count in summary.get('protection_modes', {}).items() %}
+<span class="badge {% if mode == 'Active' %}badge-success{% elif mode == 'Passive' %}badge-warning{% else %}badge-info{% endif %}">{{ mode }}: {{ count }}</span>
+{% endfor %}
+</p>
+{% endif %}
+
+{% if summary.get('app_configs') %}
+<h3>Application Details</h3>
+<table>
+    <thead><tr><th>Application</th><th>Protection Mode</th></tr></thead>
+    <tbody>
+    {% for app in summary.get('app_configs', []) %}
+    <tr>
+        <td>{{ app.name }}</td>
+        <td>
+            {% if app.get('error') %}
+            <span class="badge badge-danger">Error</span>
+            {% elif app.protection_mode == 'Active' %}
+            <span class="badge badge-success">Active</span>
+            {% elif app.protection_mode == 'Passive' %}
+            <span class="badge badge-warning">Passive</span>
+            {% else %}
+            <span class="badge badge-info">{{ app.protection_mode }}</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

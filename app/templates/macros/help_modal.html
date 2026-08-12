@@ -1,0 +1,27 @@
+{# Reusable help modal macro #}
+
+{% macro help_button(modal_id) %}
+<button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#{{ modal_id }}" title="{{ _('Help') }}">
+    <i class="bi bi-question-circle"></i>
+</button>
+{% endmacro %}
+
+{% macro help_modal(id, title, content) %}
+<div class="modal fade" id="{{ id }}" tabindex="-1" aria-labelledby="{{ id }}Label" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info bg-opacity-10">
+                <h5 class="modal-title" id="{{ id }}Label"><i class="bi bi-question-circle"></i> {{ title }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <div class="modal-body">
+                {{ content }}
+            </div>
+            <div class="modal-footer">
+                <a href="{{ url_for('help.index') }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-book"></i> {{ _('Full Help') }}</a>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">{{ _('Got it') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}

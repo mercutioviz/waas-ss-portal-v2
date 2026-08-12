@@ -1,0 +1,52 @@
+{% extends "email/report_base.html" %}
+{% block report_content %}
+<div class="stat-row">
+    <div class="stat">
+        <h2>{{ summary.get('total_requests', 0) }}</h2>
+        <p>Total Requests</p>
+    </div>
+    <div class="stat">
+        <h2>{{ summary.get('app_count', 0) }}</h2>
+        <p>Applications</p>
+    </div>
+</div>
+
+{% if summary.get('status_breakdown') %}
+<h3>HTTP Status Codes</h3>
+<table>
+    <thead><tr><th>Status</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for status, count in summary.get('status_breakdown', {}).items()|sort %}
+    <tr>
+        <td><span class="badge {% if status.startswith('2') %}badge-success{% elif status.startswith('3') %}badge-info{% elif status.startswith('4') %}badge-warning{% else %}badge-danger{% endif %}">{{ status }}</span></td>
+        <td>{{ count }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if summary.get('top_urls') %}
+<h3>Top URLs</h3>
+<table>
+    <thead><tr><th>URL</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for url, count in summary.get('top_urls', [])[:10] %}
+    <tr><td style="word-break:break-all;">{{ url }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if summary.get('method_breakdown') %}
+<h3>HTTP Methods</h3>
+<table>
+    <thead><tr><th>Method</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for method, count in summary.get('method_breakdown', {}).items() %}
+    <tr><td>{{ method }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

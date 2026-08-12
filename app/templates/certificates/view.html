@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Certificate Details') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('certificates.list_certificates') }}">{{ _('Certificates') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('certificates.list_certificates', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item active">{{ certificate.get('name', _('Certificate')) if certificate else _('Details') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-file-earmark-lock"></i> {{ _('Certificate Details') }}</h2>
+    <div class="d-flex gap-2">
+        {% if current_user.role != 'viewer' %}
+        <a href="{{ url_for('certificates.replace_certificate', account_id=account.id, app_name=app_name, cert_id=certificate.get('name', cert_id)) }}"
+           class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-repeat"></i> {{ _('Replace') }}
+        </a>
+        <form method="POST"
+              action="{{ url_for('certificates.delete_certificate', account_id=account.id, app_name=app_name, cert_id=certificate.get('name', cert_id)) }}"
+              data-confirm-message="{{ _('Delete certificate') }} &quot;{{ certificate.get('name', cert_id) }}&quot;? {{ _('This cannot be undone.') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-danger">
+                <i class="bi bi-trash"></i> {{ _('Delete') }}
+            </button>
+        </form>
+        {% endif %}
+        <a href="{{ url_for('certificates.list_certificates', account_id=account.id) }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> {{ _('Back') }}
+        </a>
+    </div>
+</div>
+
+{% if certificate %}
+<div class="card">
+    <div class="card-body">
+        <table class="table table-borderless mb-0">
+            <tr><th style="width:30%">{{ _('Name') }}</th><td>{{ certificate.get('name', 'N/A') }}</td></tr>
+            <tr><th>ID</th><td><code>{{ certificate.get('id', 'N/A') }}</code></td></tr>
+            <tr><th>{{ _('Common Name') }}</th><td>{{ certificate.get('common_name', certificate.get('commonName', 'N/A')) }}</td></tr>
+            {% set sans = certificate.get('subjectAlternativeNames', certificate.get('san', certificate.get('subject_alternative_names', []))) %}
+            {% if sans %}
+            <tr><th>{{ _('Subject Alt Names') }}</th><td>
+                {% if sans is string %}{{ sans }}{% else %}
+                {% for san in sans %}<span class="badge bg-secondary me-1">{{ san }}</span>{% endfor %}
+                {% endif %}
+            </td></tr>
+            {% endif %}
+            {% set issuer = certificate.get('issuer', certificate.get('issuerName', '')) %}
+            {% if issuer %}<tr><th>{{ _('Issuer') }}</th><td>{{ issuer }}</td></tr>{% endif %}
+            <tr><th>{{ _('Expiry Date') }}</th><td>{{ certificate.get('expiry', certificate.get('expiryDate', 'N/A')) }}</td></tr>
+            {% set key_type = certificate.get('keyType', certificate.get('key_type', '')) %}
+            {% set key_size = certificate.get('keySize', certificate.get('key_size', '')) %}
+            {% if key_type or key_size %}
+            <tr><th>{{ _('Key') }}</th><td>{{ key_type }} {% if key_size %}{{ key_size }} {{ _('bits') }}{% endif %}</td></tr>
+            {% endif %}
+            <tr><th>{{ _('Application') }}</th><td>{{ app_name }}</td></tr>
+            <tr><th>{{ _('Account') }}</th><td>{{ account.account_name }}</td></tr>
+        </table>
+    </div>
+</div>
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><a class="text-decoration-none" data-bs-toggle="collapse" href="#rawData"><i class="bi bi-code-slash"></i> {{ _('Raw Data') }}</a></h5>
+    </div>
+    <div class="collapse" id="rawData">
+        <div class="card-body"><pre class="mb-0 bg-light p-3 rounded"><code>{{ certificate|tojson(indent=2) }}</code></pre></div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

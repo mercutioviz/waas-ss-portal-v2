@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Run Details') }} - {{ report.name }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Reports'), url_for('reports.list_reports')),
+    (report.name, url_for('reports.view_report', report_id=report.id)),
+    (_('Run Details'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-clock-history"></i> {{ _('Run Details') }}: {{ report.name }}</h2>
+    <div class="d-flex gap-2">
+        <form method="POST" action="{{ url_for('reports.run_now', report_id=report.id) }}" class="d-inline" data-confirm-message="{{ _('Run this report again now?') }}" data-loading="{{ _('Running report...') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-primary"><i class="bi bi-play-circle"></i> {{ _('Re-run Now') }}</button>
+        </form>
+        <a href="{{ url_for('reports.view_report', report_id=report.id) }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Run Info') }}</h5></div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th>{{ _('Run Time') }}</th><td>{{ run.run_at|datetime_format }}</td></tr>
+                    <tr><th>{{ _('Status') }}</th><td>
+                        {% if run.status == 'success' %}<span class="badge bg-success">{{ _('Success') }}</span>
+                        {% else %}<span class="badge bg-danger">{{ _('Failed') }}</span>{% endif %}
+                    </td></tr>
+                    <tr><th>{{ _('Recipients') }}</th><td>{{ run.recipient_count }}</td></tr>
+                </table>
+                {% if run.error_message %}
+                <div class="alert alert-danger py-2 small mt-2 mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> {{ run.error_message }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Summary Data') }}</h5></div>
+            <div class="card-body">
+                {% set summary = run.summary_dict %}
+                {% if summary %}
+                    {% if report.report_type == 'waf_summary' %}
+                    <div class="row mb-3">
+                        <div class="col-4 text-center">
+                            <h4>{{ summary.get('total_events', 0) }}</h4>
+                            <small class="text-muted">{{ _('Total WAF Events') }}</small>
+                        </div>
+                        <div class="col-4 text-center">
+                            <h4>{{ summary.get('app_count', 0) }}</h4>
+                            <small class="text-muted">{{ _('Applications') }}</small>
+                        </div>
+                        <div class="col-4 text-center">
+                            <h4>{{ (summary.get('top_attacks', [])|length) }}</h4>
+                            <small class="text-muted">{{ _('Attack Types') }}</small>
+                        </div>
+                    </div>
+                    {% if summary.get('top_attacks') %}
+                    <h6>{{ _('Top Attacks') }}</h6>
+                    <table class="table table-sm">
+                        <thead><tr><th>{{ _('Attack') }}</th><th>{{ _('Count') }}</th></tr></thead>
+                        <tbody>
+                        {% for attack, count in summary.get('top_attacks', [])[:5] %}
+                        <tr><td>{{ attack }}</td><td>{{ count }}</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% endif %}
+
+                    {% elif report.report_type == 'access_summary' %}
+                    <div class="row mb-3">
+                        <div class="col-4 text-center">
+                            <h4>{{ summary.get('total_requests', 0) }}</h4>
+                            <small class="text-muted">{{ _('Total Requests') }}</small>
+                        </div>
+                        <div class="col-4 text-center">
+                            <h4>{{ summary.get('app_count', 0) }}</h4>
+                            <small class="text-muted">{{ _('Applications') }}</small>
+                        </div>
+                        <div class="col-4 text-center">
+                            <h4>{{ (summary.get('top_urls', [])|length) }}</h4>
+                            <small class="text-muted">{{ _('Unique URLs') }}</small>
+                        </div>
+                    </div>
+                    {% if summary.get('status_breakdown') %}
+                    <h6>{{ _('Status Codes') }}</h6>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% for status, count in summary.get('status_breakdown', {}).items() %}
+                        <span class="badge {% if status.startswith('2') %}bg-success{% elif status.startswith('3') %}bg-info{% elif status.startswith('4') %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ status }}: {{ count }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% elif report.report_type == 'security_overview' %}
+                    <div class="row mb-3">
+                        <div class="col-6 text-center">
+                            <h4>{{ summary.get('app_count', 0) }}</h4>
+                            <small class="text-muted">{{ _('Applications') }}</small>
+                        </div>
+                        <div class="col-6 text-center">
+                            <h4>{{ (summary.get('protection_modes', {})|length) }}</h4>
+                            <small class="text-muted">{{ _('Protection Modes') }}</small>
+                        </div>
+                    </div>
+                    {% if summary.get('protection_modes') %}
+                    <h6>{{ _('Protection Modes') }}</h6>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        {% for mode, count in summary.get('protection_modes', {}).items() %}
+                        <span class="badge {% if mode == 'Active' %}bg-success{% elif mode == 'Passive' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ mode }}: {{ count }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% endif %}
+                {% else %}
+                <p class="text-muted">{{ _('No summary data available.') }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

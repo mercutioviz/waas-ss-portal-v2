@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ report.name }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Reports'), url_for('reports.list_reports')),
+    (report.name, None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-calendar-check"></i> {{ report.name }}</h2>
+    <div>
+        <form method="POST" action="{{ url_for('reports.run_now', report_id=report.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-success"><i class="bi bi-play-fill"></i> {{ _('Run Now') }}</button>
+        </form>
+        <form method="POST" action="{{ url_for('reports.toggle_report', report_id=report.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if report.is_active %}
+            <button type="submit" class="btn btn-outline-warning"><i class="bi bi-pause-fill"></i> {{ _('Deactivate') }}</button>
+            {% else %}
+            <button type="submit" class="btn btn-outline-success"><i class="bi bi-play-fill"></i> {{ _('Activate') }}</button>
+            {% endif %}
+        </form>
+        <a href="{{ url_for('reports.edit_report', report_id=report.id) }}" class="btn btn-outline-secondary"><i class="bi bi-pencil"></i> {{ _('Edit') }}</a>
+        <form method="POST" action="{{ url_for('reports.delete_report', report_id=report.id) }}" class="d-inline" data-confirm-message="{{ _('Delete this report?') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash"></i> {{ _('Delete') }}</button>
+        </form>
+        <a href="{{ url_for('reports.list_reports') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Report Details') }}</h5></div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr>
+                        <th style="width:40%">{{ _('Type') }}</th>
+                        <td>
+                            {% if report.report_type == 'waf_summary' %}{{ _('WAF Summary') }}
+                            {% elif report.report_type == 'access_summary' %}{{ _('Access Summary') }}
+                            {% else %}{{ _('Security Overview') }}{% endif %}
+                        </td>
+                    </tr>
+                    <tr><th>{{ _('Account') }}</th><td>{{ report.account.account_name if report.account else '—' }}</td></tr>
+                    <tr><th>{{ _('Frequency') }}</th><td>{{ report.frequency|capitalize }}</td></tr>
+                    {% if report.frequency == 'weekly' %}
+                    <tr><th>{{ _('Day of Week') }}</th><td>{{ ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][report.day_of_week] if report.day_of_week is not none else '—' }}</td></tr>
+                    {% endif %}
+                    <tr><th>{{ _('Hour (UTC)') }}</th><td>{{ '%02d:00'|format(report.hour) }}</td></tr>
+                    <tr><th>{{ _('Status') }}</th><td>{% if report.is_active %}<span class="badge bg-success">{{ _('Active') }}</span>{% else %}<span class="badge bg-secondary">{{ _('Inactive') }}</span>{% endif %}</td></tr>
+                    <tr><th>{{ _('Recipients') }}</th><td>{{ report.recipients_list|join(', ') }}</td></tr>
+                    <tr><th>{{ _('Last Run') }}</th><td>{{ report.last_run_at|datetime_format if report.last_run_at else '—' }}
+                        {% if report.last_status == 'success' %}<span class="badge bg-success ms-1">{{ _('Success') }}</span>
+                        {% elif report.last_status == 'failed' %}<span class="badge bg-danger ms-1">{{ _('Failed') }}</span>{% endif %}
+                    </td></tr>
+                    <tr><th>{{ _('Next Run') }}</th><td>{{ report.next_run_at|datetime_format if report.next_run_at else '—' }}</td></tr>
+                    <tr><th>{{ _('Created') }}</th><td>{{ report.created_at|datetime_format }}</td></tr>
+                </table>
+                {% if report.last_error %}
+                <div class="alert alert-danger py-2 small mt-2 mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> {{ report.last_error }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Run History') }}</h5></div>
+            <div class="card-body p-0">
+                {% if runs %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>{{ _('Time') }}</th>
+                                <th>{{ _('Status') }}</th>
+                                <th>{{ _('Recipients') }}</th>
+                                <th>{{ _('Details') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for run in runs %}
+                            <tr>
+                                <td class="text-nowrap small">{{ run.run_at|datetime_format }}</td>
+                                <td>
+                                    {% if run.status == 'success' %}
+                                    <span class="badge bg-success">{{ _('Success') }}</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">{{ _('Failed') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ run.recipient_count }}</td>
+                                <td>
+                                    <a href="{{ url_for('reports.run_detail', report_id=report.id, run_id=run.id) }}" class="btn btn-sm btn-outline-primary" aria-label="View"><i class="bi bi-eye"></i></a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <p class="mb-0">{{ _('No runs yet. Click "Run Now" to test.') }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

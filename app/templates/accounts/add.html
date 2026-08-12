@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field, render_submit %}
+{% block title %}{{ _('Add Account') }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Accounts'), url_for('accounts.list_accounts')),
+    (_('Add Account'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-plus-circle"></i> {{ _('Add WaaS Account') }} <a href="{{ url_for('help.accounts') }}" class="text-muted small ms-1" data-bs-toggle="tooltip" title="{{ _('Open help') }}" aria-label="{{ _('Help') }}"><i class="bi bi-question-circle"></i></a></h5></div>
+            <div class="card-body">
+                <form method="POST" class="needs-validation" novalidate data-loading="{{ _('Saving account...') }}">
+                    {{ form.hidden_tag() }}
+                    {{ render_field(form.account_name, help=_('A friendly name to identify this account.')) }}
+
+                    <!-- v4 API Key -->
+                    <div class="card mb-3">
+                        <div class="card-header bg-light py-2">
+                            <h6 class="mb-0"><i class="bi bi-key"></i> {{ _('API Key') }} (<abbr data-bs-toggle="tooltip" title="{{ _('WaaS API v4 — primary API for applications, certs, logs, and security config') }}">v4</abbr>)</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                {{ form.api_key(class="form-control font-monospace", placeholder=_("Enter WaaS API token"), **{'data-bs-toggle': 'tooltip', 'data-bs-placement': 'top', 'title': _('Found in WaaS Console > Account Settings > API Keys')}) }}
+                                <div class="form-text">{{ _('Your Barracuda WaaS v4 API token. This will be encrypted at rest.') }}</div>
+                                {% for e in form.api_key.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+                            </div>
+                            {{ render_field(form.api_key_expiry, help=_('Optional. Set a reminder date for when this API key expires.')) }}
+                        </div>
+                    </div>
+
+                    <!-- v2 Email/Password Credentials -->
+                    <div class="card mb-3">
+                        <div class="card-header bg-light py-2">
+                            <h6 class="mb-0"><i class="bi bi-person-lock"></i> {{ _('WaaS Login Credentials') }} (<abbr data-bs-toggle="tooltip" title="{{ _('WaaS API v2 — used for account verification, app creation, and deletion') }}">v2</abbr>)</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                {{ form.waas_email(class="form-control", placeholder="user@example.com", **{'data-bs-toggle': 'tooltip', 'data-bs-placement': 'top', 'title': _('The email you use to sign into waas.barracudanetworks.com')}) }}
+                                <div class="form-text">{{ _('Email used to log into the Barracuda WaaS platform.') }}</div>
+                                {% for e in form.waas_email.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+                            </div>
+                            <div class="mb-0">
+                                {{ form.waas_password(class="form-control", placeholder=_("Enter WaaS password"), **{'data-bs-toggle': 'tooltip', 'data-bs-placement': 'top', 'title': _('Required for app creation, deletion, and account verification')}) }}
+                                <div class="form-text">{{ _('Password for WaaS platform login. Required for account verification. Encrypted at rest.') }}</div>
+                                {% for e in form.waas_password.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info py-2 small">
+                        <i class="bi bi-info-circle"></i>
+                        {{ _('At least one credential type is required: API key') }} <strong>{{ _('or') }}</strong> {{ _('email + password (or both). Email/password enables account verification and v2 API features.') }}
+                    </div>
+
+                    {{ render_submit(form, cancel_url=url_for('accounts.list_accounts')) }}
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

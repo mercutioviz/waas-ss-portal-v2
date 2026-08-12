@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Browse Application') }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications', account_id=account.id) }}">{{ _('Applications') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}">{{ app_id }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Browse') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-display"></i> {{ _('Browse Application') }}</h2>
+    <a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> {{ _('Back to App') }}
+    </a>
+</div>
+
+<div class="mb-3">
+    <span class="text-muted">{{ _('Account:') }}</span> <strong>{{ account.account_name }}</strong> |
+    <span class="text-muted">{{ _('Application:') }}</span> <strong>{{ app_id }}</strong>
+</div>
+
+<!-- Info Alert -->
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    <strong>{{ _('How it works:') }}</strong> {{ _('This feature launches a server-side Chromium browser with DNS overrides so you can browse your WaaS-protected application without changing your local DNS or hosts file. The browser is streamed to your screen via noVNC. WAF logs are displayed alongside the browser session in real time.') }}
+</div>
+
+{% if not app_data %}
+<div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle"></i> {{ _('Could not load application data from the WaaS API. Please verify the account API key is valid and the application exists.') }}
+</div>
+{% else %}
+
+<div class="row g-4">
+    <!-- Application Info -->
+    <div class="col-md-5">
+        <div class="card h-100">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-globe"></i> {{ _('Application Info') }}</h5></div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr>
+                        <th style="width:35%">{{ _('Name') }}</th>
+                        <td>{{ app_data.get('name', app_id) }}</td>
+                    </tr>
+                    <tr>
+                        <th>CNAME</th>
+                        <td>
+                            {% if cname %}
+                            <code>{{ cname }}</code>
+                            {% else %}
+                            <span class="text-muted">{{ _('Not available') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>{{ _('Domains') }}</th>
+                        <td>
+                            {% if domains %}
+                            {% for d in domains %}
+                            <span class="badge bg-secondary me-1 mb-1"><code class="text-white">{{ d }}</code></span>
+                            {% endfor %}
+                            {% else %}
+                            <span class="text-muted">{{ _('No domains configured') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Session / Active Session -->
+    <div class="col-md-7">
+        {% if active_session %}
+        <!-- Active Session Card -->
+        <div class="card border-success h-100">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-play-circle"></i> {{ _('Active Session') }}</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-3">
+                    <tr>
+                        <th style="width:35%">{{ _('Domain') }}</th>
+                        <td><code>{{ active_session.domain }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>CNAME → IP</th>
+                        <td><code>{{ active_session.cname }}</code> → <code>{{ active_session.cname_ip }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>{{ _('Status') }}</th>
+                        <td><span class="badge bg-success"><i class="bi bi-circle-fill"></i> {{ active_session.status|title }}</span></td>
+                    </tr>
+                    <tr>
+                        <th>{{ _('Started') }}</th>
+                        <td>{{ active_session.started_at|datetime_format }}</td>
+                    </tr>
+                    <tr>
+                        <th>{{ _('Elapsed') }}</th>
+                        <td id="elapsed-time">{{ (active_session.elapsed_seconds // 60) }}m {{ (active_session.elapsed_seconds % 60) }}s</td>
+                    </tr>
+                </table>
+                <div class="d-flex gap-2">
+                    <a href="{{ url_for('proxy.session_view', account_id=account.id, app_id=app_id) }}" class="btn btn-success flex-fill">
+                        <i class="bi bi-display"></i> {{ _('Open Session') }}
+                    </a>
+                    <form method="POST" action="{{ url_for('proxy.stop', account_id=account.id, app_id=app_id) }}" class="flex-fill">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-outline-danger w-100" data-confirm="{{ _('Stop the active proxy session?') }}">
+                            <i class="bi bi-stop-circle"></i> {{ _('Stop Session') }}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        {% else %}
+        <!-- Start New Session Card -->
+        <div class="card h-100">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-rocket-takeoff"></i> {{ _('Start Browsing Session') }}</h5></div>
+            <div class="card-body">
+                {% if not cname %}
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    {{ _('No CNAME found for this application. A CNAME is required to route traffic through WaaS.') }}
+                </div>
+                {% elif not domains %}
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    {{ _('No domains configured for this application.') }}
+                </div>
+                {% else %}
+                <form method="POST" action="{{ url_for('proxy.start', account_id=account.id, app_id=app_id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="cname" value="{{ cname }}">
+
+                    <div class="mb-3">
+                        <label for="domain" class="form-label fw-bold">{{ _('Select Domain to Browse') }}</label>
+                        <select name="domain" id="domain" class="form-select form-select-lg" required>
+                            {% for d in domains %}
+                            <option value="{{ d }}">{{ d }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            {{ _('The browser will resolve') }} <strong>{{ _('this domain') }}</strong> {{ _('to the WaaS CNAME IP') }}
+                            (<code>{{ cname }}</code>), {{ _('bypassing your local DNS.') }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">CNAME</label>
+                        <input type="text" class="form-control" value="{{ cname }}" readonly>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg w-100">
+                        <i class="bi bi-play-fill"></i> {{ _('Start Browsing Session') }}
+                    </button>
+                </form>
+
+                <div class="mt-3">
+                    <small class="text-muted">
+                        <i class="bi bi-clock"></i> {{ _('Sessions automatically expire after 30 minutes. Max 3 concurrent sessions per user.') }}
+                    </small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

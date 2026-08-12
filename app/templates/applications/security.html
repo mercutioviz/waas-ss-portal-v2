@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+{% from "macros/help_modal.html" import help_button, help_modal %}
+{% from "macros/api_curl_modal.html" import api_curl_button, api_curl_modal %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Security Config') }} — {{ application.get('name', 'Application') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Applications'), url_for('applications.list_applications')),
+    (account.account_name, url_for('applications.list_applications', account_id=account.id)),
+    (application.get('name', app_id), url_for('applications.view_application', account_id=account.id, app_id=app_id)),
+    (_('Security'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <h2><i class="bi bi-shield-lock"></i> {{ _('Security Configuration') }} {{ help_button('securityHelpModal') }}</h2>
+    <div class="d-flex gap-2">
+        {% if current_user.role != 'viewer' %}
+        <a href="{{ url_for('templates.save_as_template', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-file-earmark-plus"></i> {{ _('Save as Template') }}
+        </a>
+        {% endif %}
+        <a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> {{ _('Back to Application') }}
+        </a>
+    </div>
+</div>
+
+<div class="mb-3">
+    <span class="text-muted">{{ _('Account:') }}</span> <strong>{{ account.account_name }}</strong>
+    <span class="text-muted ms-3">{{ _('Application:') }}</span> <strong>{{ application.get('name', 'N/A') }}</strong>
+</div>
+
+{% set user_can_write = current_user.role != 'viewer' %}
+
+{% if security %}
+<div class="row g-4">
+    {# Protection Mode #}
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-shield-check"></i> {{ _('Protection Mode') }}</h5>
+            </div>
+            <div class="card-body">
+                {% set mode = security.get('protection_mode', security.get('mode', 'Unknown')) %}
+                <div class="text-center mb-3">
+                    {% if user_can_write %}
+                    <select class="form-select d-inline-block security-inline-edit" style="max-width: 250px;"
+                            data-section="basic_security" data-field="protection_mode" data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                        <option value="Active" {{ 'selected' if mode == 'Active' }}>{{ _('Active (block attacks)') }}</option>
+                        <option value="Passive" {{ 'selected' if mode == 'Passive' }}>{{ _('Passive (log only)') }}</option>
+                    </select>
+                    <span class="field-status ms-1"></span>
+                    {% else %}
+                    <span class="badge fs-5 {% if mode == 'Active' %}bg-success{% elif mode == 'Passive' %}bg-warning text-dark{% else %}bg-secondary{% endif %} px-4 py-2">
+                        {% if mode == 'Active' %}<i class="bi bi-shield-fill-check"></i>
+                        {% elif mode == 'Passive' %}<i class="bi bi-shield-fill-exclamation"></i>
+                        {% else %}<i class="bi bi-shield"></i>{% endif %}
+                        {{ mode }}
+                    </span>
+                    {% endif %}
+                </div>
+
+                {% if security.get('clickjacking_protection') %}
+                <hr class="my-2">
+                <h6 class="text-muted mt-2">{{ _('Clickjacking Protection') }}</h6>
+                <table class="table table-borderless table-sm mb-0">
+                    {% for key, value in security.get('clickjacking_protection', {}).items() %}
+                    <tr>
+                        <th style="width:50%">{{ key | replace('_', ' ') | title }}</th>
+                        <td>
+                            {% if value is sameas true or value is sameas false %}
+                                {% if user_can_write %}
+                                <div class="form-check form-switch d-inline-block">
+                                    <input class="form-check-input security-inline-toggle" type="checkbox"
+                                           data-section="clickjacking_protection" data-field="{{ key }}"
+                                           data-account-id="{{ account.id }}" data-app-id="{{ app_id }}"
+                                           {{ 'checked' if value }}>
+                                </div>
+                                <span class="field-status"></span>
+                                {% else %}
+                                {% if value %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}
+                                {% endif %}
+                            {% else %}{{ value }}{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% endif %}
+
+                {% if security.get('data_theft_protection') %}
+                <hr class="my-2">
+                <h6 class="text-muted mt-2">{{ _('Data Theft Protection') }}</h6>
+                <table class="table table-borderless table-sm mb-0">
+                    {% for key, value in security.get('data_theft_protection', {}).items() %}
+                    <tr>
+                        <th style="width:50%">{{ key | replace('_', ' ') | title }}</th>
+                        <td>
+                            {% if value is sameas true or value is sameas false %}
+                                {% if user_can_write %}
+                                <div class="form-check form-switch d-inline-block">
+                                    <input class="form-check-input security-inline-toggle" type="checkbox"
+                                           data-section="data_theft_protection" data-field="{{ key }}"
+                                           data-account-id="{{ account.id }}" data-app-id="{{ app_id }}"
+                                           {{ 'checked' if value }}>
+                                </div>
+                                <span class="field-status"></span>
+                                {% else %}
+                                {% if value %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}
+                                {% endif %}
+                            {% elif value is mapping %}
+                            <code>{{ value | tojson }}</code>
+                            {% else %}{{ value }}{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {# Request Limits #}
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-speedometer2"></i> {{ _('Request Limits') }}</h5>
+            </div>
+            <div class="card-body">
+                {% set rl = security.get('request_limits', {}) %}
+                {% set limit_fields = [
+                    ('max_request_length', _('Max Request Length')),
+                    ('max_request_line_length', _('Max Request Line Length')),
+                    ('max_url_length', _('Max URL Length')),
+                    ('max_number_of_headers', _('Max Number of Headers')),
+                    ('max_header_value_length', _('Max Header Value Length')),
+                    ('max_cookie_name_length', _('Max Cookie Name Length')),
+                    ('max_cookie_value_length', _('Max Cookie Value Length')),
+                ] %}
+                <table class="table table-borderless table-sm mb-0">
+                    {% for field_key, field_label in limit_fields %}
+                    {% set field_value = security.get(field_key, rl.get(field_key, '')) %}
+                    <tr>
+                        <th style="width:60%">{{ field_label }}</th>
+                        <td>
+                            {% if user_can_write %}
+                            <input type="number" class="form-control form-control-sm inline-edit-field security-inline-number"
+                                   value="{{ field_value }}"
+                                   data-section="request_limits" data-field="{{ field_key }}"
+                                   data-account-id="{{ account.id }}" data-app-id="{{ app_id }}">
+                            <span class="field-status"></span>
+                            {% else %}
+                            {{ field_value if field_value != '' else 'N/A' }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+{# Collapsible Bulk Edit Forms (fallback for non-viewer users) #}
+{% if user_can_write %}
+{# Protection Mode - Bulk Edit #}
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#editProtectionMode" role="button">
+                <i class="bi bi-pencil-square"></i> {{ _('Edit Protection Mode') }}
+            </a>
+        </h5>
+    </div>
+    <div class="collapse" id="editProtectionMode">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('applications.update_security_config', account_id=account.id, app_id=app_id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="section" value="basic_security">
+
+                <div class="mb-3">
+                    <label for="protection_mode" class="form-label">{{ _('Protection Mode') }}</label>
+                    {% set mode = security.get('protection_mode', security.get('mode', 'Unknown')) %}
+                    <select name="protection_mode" id="protection_mode" class="form-select" style="max-width:300px">
+                        <option value="Active" {% if mode == 'Active' %}selected{% endif %}>{{ _('Active (block attacks)') }}</option>
+                        <option value="Passive" {% if mode == 'Passive' %}selected{% endif %}>{{ _('Passive (log only)') }}</option>
+                    </select>
+                    <div class="form-text">
+                        <strong>{{ _('Active:') }}</strong> {{ _('Malicious requests are blocked.') }}<br>
+                        <strong>{{ _('Passive:') }}</strong> {{ _('Attacks are logged but not blocked — useful for tuning.') }}
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-circle"></i> {{ _('Update Protection Mode') }}
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+{# Request Limits - Bulk Edit #}
+{% set rl = security.get('request_limits', {}) %}
+<div class="card mt-3">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#editRequestLimits" role="button">
+                <i class="bi bi-pencil-square"></i> {{ _('Edit Request Limits') }}
+            </a>
+        </h5>
+    </div>
+    <div class="collapse" id="editRequestLimits">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('applications.update_security_config', account_id=account.id, app_id=app_id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="section" value="request_limits">
+
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <label for="max_request_length" class="form-label">{{ _('Max Request Length') }}</label>
+                        <input type="number" name="max_request_length" id="max_request_length" class="form-control"
+                               value="{{ rl.get('max_request_length', '') }}">
+                    </div>
+                    <div class="col-lg-6">
+                        <label for="max_request_line_length" class="form-label">{{ _('Max Request Line Length') }}</label>
+                        <input type="number" name="max_request_line_length" id="max_request_line_length" class="form-control"
+                               value="{{ rl.get('max_request_line_length', '') }}">
+                    </div>
+                    <div class="col-lg-6">
+                        <label for="max_url_length" class="form-label">{{ _('Max URL Length') }}</label>
+                        <input type="number" name="max_url_length" id="max_url_length" class="form-control"
+                               value="{{ rl.get('max_url_length', '') }}">
+                    </div>
+                    <div class="col-lg-6">
+                        <label for="max_number_of_headers" class="form-label">{{ _('Max Number of Headers') }}</label>
+                        <input type="number" name="max_number_of_headers" id="max_number_of_headers" class="form-control"
+                               value="{{ rl.get('max_number_of_headers', '') }}">
+                    </div>
+                    <div class="col-lg-6">
+                        <label for="max_header_value_length" class="form-label">{{ _('Max Header Value Length') }}</label>
+                        <input type="number" name="max_header_value_length" id="max_header_value_length" class="form-control"
+                               value="{{ rl.get('max_header_value_length', '') }}">
+                    </div>
+                    <div class="col-lg-6">
+                        <label for="max_cookie_name_length" class="form-label">{{ _('Max Cookie Name Length') }}</label>
+                        <input type="number" name="max_cookie_name_length" id="max_cookie_name_length" class="form-control"
+                               value="{{ rl.get('max_cookie_name_length', '') }}">
+                    </div>
+                    <div class="col-lg-6">
+                        <label for="max_cookie_value_length" class="form-label">{{ _('Max Cookie Value Length') }}</label>
+                        <input type="number" name="max_cookie_value_length" id="max_cookie_value_length" class="form-control"
+                               value="{{ rl.get('max_cookie_value_length', '') }}">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary mt-3">
+                    <i class="bi bi-check-circle"></i> {{ _('Update Request Limits') }}
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+{# Clickjacking Protection - Bulk Edit #}
+{% set cj = security.get('clickjacking_protection', {}) %}
+<div class="card mt-3">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#editClickjacking" role="button">
+                <i class="bi bi-pencil-square"></i> {{ _('Edit Clickjacking Protection') }}
+            </a>
+        </h5>
+    </div>
+    <div class="collapse" id="editClickjacking">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('applications.update_security_config', account_id=account.id, app_id=app_id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="section" value="clickjacking_protection">
+
+                {% for key, value in cj.items() %}
+                {% if value is sameas true or value is sameas false %}
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="cj_{{ key }}" name="{{ key }}" value="true" {% if value %}checked{% endif %}>
+                    <label class="form-check-label" for="cj_{{ key }}">{{ key | replace('_', ' ') | title }}</label>
+                </div>
+                {% endif %}
+                {% endfor %}
+
+                <button type="submit" class="btn btn-primary mt-3">
+                    <i class="bi bi-check-circle"></i> {{ _('Update Clickjacking Protection') }}
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+{# Data Theft Protection - Bulk Edit #}
+{% set dtp = security.get('data_theft_protection', {}) %}
+<div class="card mt-3">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#editDataTheft" role="button">
+                <i class="bi bi-pencil-square"></i> {{ _('Edit Data Theft Protection') }}
+            </a>
+        </h5>
+    </div>
+    <div class="collapse" id="editDataTheft">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('applications.update_security_config', account_id=account.id, app_id=app_id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="section" value="data_theft_protection">
+
+                {% for key, value in dtp.items() %}
+                {% if value is sameas true or value is sameas false %}
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="dtp_{{ key }}" name="{{ key }}" value="true" {% if value %}checked{% endif %}>
+                    <label class="form-check-label" for="dtp_{{ key }}">{{ key | replace('_', ' ') | title }}</label>
+                </div>
+                {% endif %}
+                {% endfor %}
+
+                <button type="submit" class="btn btn-primary mt-3">
+                    <i class="bi bi-check-circle"></i> {{ _('Update Data Theft Protection') }}
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# Raw Security Data #}
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <a class="text-decoration-none" data-bs-toggle="collapse" href="#rawSecurityData" role="button">
+                <i class="bi bi-code-slash"></i> {{ _('Raw API Data') }}
+            </a>
+        </h5>
+        {% if security_curl %}{{ api_curl_button('securityCurlModal') }}{% endif %}
+    </div>
+    <div class="collapse" id="rawSecurityData">
+        <div class="card-body">
+            <pre class="mb-0 bg-light p-3 rounded" style="max-height: 500px; overflow-y: auto;"><code>{{ security|tojson(indent=2) }}</code></pre>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-shield-x display-1 text-muted"></i>
+        <h4 class="mt-3">{{ _('No Security Configuration') }}</h4>
+        <p class="text-muted">{{ _('Could not retrieve security configuration for this application.') }}</p>
+    </div>
+</div>
+{% endif %}
+{% if security_curl %}{{ api_curl_modal('securityCurlModal', security_curl) }}{% endif %}
+{{ help_modal('securityHelpModal', _('Security Configuration Help'), '
+<h6>' ~ _('Protection Modes') ~ '</h6>
+<ul>
+    <li><strong>' ~ _('Active') ~ '</strong> — ' ~ _('Malicious requests are blocked and logged. Use in production.') ~ '</li>
+    <li><strong>' ~ _('Passive') ~ '</strong> — ' ~ _('Attacks are logged but not blocked. Use for initial tuning.') ~ '</li>
+</ul>
+<h6>' ~ _('Request Limits') ~ '</h6>
+<p>' ~ _('Control max sizes for HTTP request components. Edit values inline — they save on blur or Enter. Values are in bytes.') ~ '</p>
+<h6>' ~ _('Inline Editing') ~ '</h6>
+<p>' ~ _('Toggles and dropdowns save automatically. Number fields save when you press Enter or click away. Look for the green checkmark or red X.') ~ '</p>
+<p><a href="' ~ url_for('help.security') ~ '">' ~ _('Full security documentation') ~ ' &rarr;</a></p>
+') }}
+
+{% endblock %}
+
+{% block extra_js %}
+{% if security and current_user.role != 'viewer' %}
+<script>
+(function() {
+    var csrfToken = document.querySelector('meta[name="csrf-token"]');
+    var csrf = csrfToken ? csrfToken.getAttribute('content') : '';
+
+    function securityAjax(el, value) {
+        var section = el.dataset.section;
+        var field = el.dataset.field;
+        var accountId = el.dataset.accountId;
+        var appId = el.dataset.appId;
+        var statusEl = el.closest('td') ? el.closest('td').querySelector('.field-status') : el.nextElementSibling;
+
+        if (statusEl) statusEl.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+
+        fetch('/applications/' + accountId + '/' + appId + '/security/ajax', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrf,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ section: section, field: field, value: value })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(resp) {
+            if (resp.success) {
+                if (statusEl) statusEl.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
+                setTimeout(function() { if (statusEl) statusEl.innerHTML = ''; }, 2000);
+            } else {
+                if (statusEl) statusEl.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+                if (window.showToast) window.showToast(resp.error || 'Save failed.', 'danger');
+            }
+        })
+        .catch(function(err) {
+            if (statusEl) statusEl.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+            if (window.showToast) window.showToast('Network error.', 'danger');
+        });
+    }
+
+    // Toggle switches (booleans)
+    document.querySelectorAll('.security-inline-toggle').forEach(function(toggle) {
+        toggle.addEventListener('change', function() {
+            securityAjax(toggle, toggle.checked);
+        });
+    });
+
+    // Select dropdowns (protection mode)
+    document.querySelectorAll('.security-inline-edit').forEach(function(select) {
+        select.addEventListener('change', function() {
+            securityAjax(select, select.value);
+        });
+    });
+
+    // Number inputs (request limits) — save on blur or Enter
+    document.querySelectorAll('.security-inline-number').forEach(function(input) {
+        var origValue = input.value;
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                input.blur();
+            }
+        });
+
+        input.addEventListener('blur', function() {
+            if (input.value !== origValue) {
+                origValue = input.value;
+                securityAjax(input, input.value);
+            }
+        });
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

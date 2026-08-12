@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import module_info, breadcrumbs, empty_state %}
+{% block title %}{{ _('Scheduled Reports') }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Reports'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+{{ module_info(
+    key='reports',
+    icon='calendar-check',
+    title=_('Scheduled Reports'),
+    body=_('Receive periodic summaries by email — WAF activity, access metrics, and security overviews — on a daily, weekly, or monthly cadence.'),
+    help_topic='help.reports'
+) }}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-calendar-check"></i> {{ _('Scheduled Reports') }}</h2>
+    <a href="{{ url_for('reports.add_report') }}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> {{ _('Add Report') }}</a>
+</div>
+
+{% if reports %}
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" aria-label="Reports">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Type') }}</th>
+                        <th>{{ _('Frequency') }}</th>
+                        <th>{{ _('Account') }}</th>
+                        <th>{{ _('Status') }}</th>
+                        <th>{{ _('Last Run') }}</th>
+                        <th>{{ _('Next Run') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for report in reports %}
+                    <tr>
+                        <td><a href="{{ url_for('reports.view_report', report_id=report.id) }}"><strong>{{ report.name }}</strong></a></td>
+                        <td>
+                            {% if report.report_type == 'waf_summary' %}
+                            <span class="badge bg-danger">{{ _('WAF Summary') }}</span>
+                            {% elif report.report_type == 'access_summary' %}
+                            <span class="badge bg-primary">{{ _('Access Summary') }}</span>
+                            {% else %}
+                            <span class="badge bg-info">{{ _('Security Overview') }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ report.frequency|capitalize }}</td>
+                        <td>{{ report.account.account_name if report.account else '—' }}</td>
+                        <td>
+                            {% if report.is_active %}
+                            <span class="badge bg-success">{{ _('Active') }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ _('Inactive') }}</span>
+                            {% endif %}
+                            {% if report.last_status == 'failed' %}
+                            <span class="badge bg-danger">{{ _('Last Failed') }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ report.last_run_at|datetime_format if report.last_run_at else '—' }}</td>
+                        <td>{{ report.next_run_at|datetime_format if report.next_run_at else '—' }}</td>
+                        <td>
+                            <a href="{{ url_for('reports.view_report', report_id=report.id) }}" class="btn btn-sm btn-outline-primary" aria-label="View"><i class="bi bi-eye"></i></a>
+                            <a href="{{ url_for('reports.edit_report', report_id=report.id) }}" class="btn btn-sm btn-outline-secondary" aria-label="Edit"><i class="bi bi-pencil"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+{{ empty_state('calendar-check', _('No Scheduled Reports'), _('Create a scheduled report to receive periodic WAF and access summaries via email.'), cta={'label': _('Add Report'), 'url': url_for('reports.add_report'), 'icon': 'plus-circle'}) }}
+{% endif %}
+{% endblock %}
