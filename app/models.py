@@ -724,3 +724,69 @@ class Notification(db.Model):
         """Return recent notifications for user, newest first."""
         return Notification.query.filter_by(user_id=user_id)\
             .order_by(Notification.created_at.desc()).limit(limit).all()
+
+
+class SiteProfile(db.Model):
+    """Result of a Web App Profiler run against a customer URL."""
+    __tablename__ = 'site_profiles'
+
+    STATUS_PENDING = 'pending'
+    STATUS_PROBING = 'probing'
+    STATUS_COMPLETE = 'complete'
+    STATUS_ERROR = 'error'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('waas_accounts.id', ondelete='CASCADE'),
+                           nullable=False, index=True)
+    target_url = db.Column(db.String(2048), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default=STATUS_PENDING, index=True)
+    # UUID reused as SocketIO room name for progress streaming.
+    session_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    profile_data = db.Column(db.Text, nullable=True)         # JSON blob: raw probe result
+    recommendation_data = db.Column(db.Text, nullable=True)  # JSON blob: form_fields + advisories
+    error_message = db.Column(db.Text, nullable=True)
+
+    user = db.relationship('User', backref=db.backref('site_profiles', lazy='dynamic'))
+    account = db.relationship('WaasAccount', backref=db.backref('site_profiles', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<SiteProfile {self.id}: {self.target_url} [{self.status}]>'
+
+    @property
+    def profile(self):
+        """Deserialize profile_data JSON blob (None if unset)."""
+        if not self.profile_data:
+            return None
+        return json.loads(self.profile_data)
+
+    @profile.setter
+    def profile(self, value):
+        self.profile_data = json.dumps(value) if value is not None else None
+
+    @property
+    def recommendation(self):
+        """Deserialize recommendation_data JSON blob (None if unset)."""
+        if not self.recommendation_data:
+            return None
+        return json.loads(self.recommendation_data)
+
+    @recommendation.setter
+    def recommendation(self, value):
+        self.recommendation_data = json.dumps(value) if value is not None else None
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'account_id': self.account_id,
+            'target_url': self.target_url,
+            'status': self.status,
+            'session_id': self.session_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'error_message': self.error_message,
+        }
