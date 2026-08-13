@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field %}
+{% block title %}{{ _('Review suggested config') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Profile a site'), url_for('profiler.new_profile', account_id=profile.account_id)),
+    (_('Review'), None)
+]) }}
+{% endblock %}
+
+{% macro rationale(field_key) -%}
+    {%- set rec = form_fields.get(field_key) -%}
+    {%- if rec and rec.rationale -%}
+        <span class="ms-1 text-muted"
+              data-bs-toggle="popover" data-bs-trigger="hover focus"
+              data-bs-placement="right" data-bs-content="{{ rec.rationale }}"
+              tabindex="0" role="button" aria-label="{{ _('Why this value') }}">
+            <i class="bi bi-info-circle"></i>
+        </span>
+    {%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+<div class="mt-4 mb-3">
+    <h2><i class="bi bi-check2-square"></i> {{ _('Review suggested config') }}</h2>
+    <p class="text-muted mb-0">
+        {{ _('Probed') }} <code>{{ profile.target_url }}</code>
+        · {{ _('Account:') }} <strong>{{ account.account_name }}</strong>
+    </p>
+</div>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('Suggested application settings') }}</h5></div>
+            <div class="card-body">
+                <form method="POST"
+                      action="{{ url_for('applications.create_application', account_id=account.id) }}"
+                      data-loading="{{ _('Creating application...') }}">
+                    {{ form.hidden_tag() }}
+                    <input type="hidden" name="profile_id" value="{{ profile.id }}">
+
+                    <div class="mb-3">
+                        {{ form.application_name.label(class="form-label") }}{{ rationale('application_name') }}
+                        {{ form.application_name(class="form-control") }}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.hostname.label(class="form-label") }}{{ rationale('hostname') }}
+                        {{ form.hostname(class="form-control") }}
+                    </div>
+
+                    <hr>
+                    <h6 class="text-muted mb-3">{{ _('Backend Server') }}</h6>
+
+                    <div class="mb-3">
+                        {{ form.backend_ip.label(class="form-label") }}{{ rationale('backend_ip') }}
+                        {{ form.backend_ip(class="form-control", placeholder=_('e.g., 10.0.0.1 or origin.example.com')) }}
+                        <div class="form-text text-warning">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            {{ _('You must fill this in — it cannot be probed from the public URL.') }}
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            {{ form.backend_port.label(class="form-label") }}{{ rationale('backend_port') }}
+                            {{ form.backend_port(class="form-control") }}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            {{ form.backend_type.label(class="form-label") }}{{ rationale('backend_type') }}
+                            {{ form.backend_type(class="form-select") }}
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h6 class="text-muted mb-3">{{ _('Security & Endpoints') }}</h6>
+
+                    <div class="mb-3">
+                        {{ form.malicious_traffic.label(class="form-label") }}{{ rationale('malicious_traffic') }}
+                        {{ form.malicious_traffic(class="form-select") }}
+                    </div>
+
+                    <div class="card bg-light mb-3">
+                        <div class="card-body py-2">
+                            <div class="form-check mb-2">
+                                {{ form.use_https() }}
+                                <label class="form-check-label" for="use_https">{{ _('Create HTTPS endpoint (port 443)') }}</label>
+                                {{ rationale('use_https') }}
+                            </div>
+                            <div class="form-check mb-2">
+                                {{ form.use_http() }}
+                                <label class="form-check-label" for="use_http">{{ _('Create HTTP endpoint (port 80)') }}</label>
+                                {{ rationale('use_http') }}
+                            </div>
+                            <div class="form-check">
+                                {{ form.redirect_http() }}
+                                <label class="form-check-label" for="redirect_http">{{ _('Redirect HTTP to HTTPS') }}</label>
+                                {{ rationale('redirect_http') }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        {{ form.submit() }}
+                        <a href="{{ url_for('profiler.new_profile', account_id=account.id) }}"
+                           class="btn btn-outline-secondary">{{ _('Profile a different URL') }}</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-lightbulb"></i> {{ _('What we noticed') }}</h5>
+            </div>
+            <div class="card-body">
+                {% if advisories %}
+                    {% for adv in advisories %}
+                    <div class="alert alert-{{ 'warning' if adv.severity == 'warning' else ('danger' if adv.severity == 'error' else 'info') }} py-2">
+                        <div class="fw-semibold mb-1">
+                            {% if adv.severity == 'warning' %}<i class="bi bi-exclamation-triangle"></i>
+                            {% elif adv.severity == 'error' %}<i class="bi bi-x-circle"></i>
+                            {% else %}<i class="bi bi-info-circle"></i>{% endif %}
+                            {{ adv.title }}
+                        </div>
+                        <div class="small mb-0">{{ adv.body }}</div>
+                        {% if adv.action %}
+                        <a href="{{ adv.action.url }}" class="btn btn-sm btn-outline-secondary mt-2">{{ adv.action.label }}</a>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted small mb-0">{{ _('No advisories — the site looks clean.') }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var triggers = document.querySelectorAll('[data-bs-toggle="popover"]');
+    triggers.forEach(function(el) { new bootstrap.Popover(el); });
+})();
+</script>
+{% endblock %}

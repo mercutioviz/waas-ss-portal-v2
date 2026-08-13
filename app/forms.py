@@ -347,6 +347,33 @@ class ApplicationCreateForm(FlaskForm):
     submit = SubmitField(_l('Create Application'), render_kw={'class': 'btn btn-primary'})
 
 
+class ProfileUrlForm(FlaskForm):
+    """Kicks off a Web App Profiler run. Single URL field; validation is
+    strict at the WTForms layer (must have a host) and the probe itself
+    layers on DNS resolution + SSRF checks."""
+    target_url = StringField(
+        _l('Site URL'),
+        validators=[
+            DataRequired(),
+            Length(min=4, max=2048),
+            Regexp(
+                r'^(https?://)?[A-Za-z0-9._-]+(:\d+)?(/.*)?$',
+                message=_l('Enter a hostname or full URL, e.g. www.example.com or https://www.example.com/'),
+            ),
+        ],
+        render_kw={
+            'placeholder': _l('e.g., https://www.example.com'),
+            'class': 'form-control form-control-lg',
+            'autocomplete': 'off',
+            'inputmode': 'url',
+        }
+    )
+    submit = SubmitField(
+        _l('Profile this site'),
+        render_kw={'class': 'btn btn-primary btn-lg'}
+    )
+
+
 class RotateApiKeyForm(FlaskForm):
     """Form for rotating an API key on a WaaS account"""
     new_api_key = StringField(

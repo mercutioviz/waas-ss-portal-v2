@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/forms.html" import render_field %}
+{% block title %}{{ _('Profile a site') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('New site'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-9 col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="mb-0"><i class="bi bi-compass"></i> {{ _('Profile a site') }}</h2>
+        </div>
+
+        <div class="alert alert-info py-2 small">
+            <i class="bi bi-info-circle"></i>
+            {{ _('Creating on account') }} <strong>{{ account.account_name }}</strong>.
+            {{ _('The profiler probes the site you enter (TLS, headers, redirect behavior, tech stack, auth surface) and then pre-fills the create-application form with defaults you can review.') }}
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('profiler.new_profile', account_id=account.id) }}"
+                      data-loading="{{ _('Kicking off probe...') }}">
+                    {{ form.hidden_tag() }}
+
+                    {{ render_field(
+                        form.target_url,
+                        autofocus=true,
+                        help=_('A hostname or full URL. If you omit the scheme we assume https://.'),
+                    ) }}
+
+                    <div class="d-flex gap-2 mt-4">
+                        {{ form.submit() }}
+                        <a href="{{ url_for('applications.list_applications', account_id=account.id) }}"
+                           class="btn btn-outline-secondary">{{ _('Cancel') }}</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="mt-3 text-muted small">
+            <i class="bi bi-shield-lock"></i>
+            {{ _('We only probe public sites — private, loopback, and link-local addresses are rejected. The origin server address behind your CDN or load balancer will still be up to you.') }}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -186,7 +186,7 @@ def create_app(config_name='default'):
         return {'csrf_token': generate_csrf}
 
     # Register blueprints
-    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features
+    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features, profiler
     from app.routes import help as help_bp
     app.register_blueprint(main.bp)
     app.register_blueprint(auth.bp)
@@ -201,6 +201,7 @@ def create_app(config_name='default'):
     app.register_blueprint(features.legacy_bp)  # 301 redirect /features/* -> /raw-configs/*
     app.register_blueprint(reports.bp)
     app.register_blueprint(help_bp.bp)
+    app.register_blueprint(profiler.bp)
 
     # Register SocketIO event handlers
     from app import socketio_events  # noqa: F401

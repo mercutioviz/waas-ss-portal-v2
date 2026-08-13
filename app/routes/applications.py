@@ -276,12 +276,17 @@ def create_application(account_id):
             result = client.create_application_v2(data)
             app_name = form.application_name.data.strip()
 
+            profile_id = request.form.get('profile_id', type=int)
+            details = f'Created application "{app_name}" on account {account.account_name} (v2 API)'
+            if profile_id:
+                details += f' [source=profiler:{profile_id}]'
+
             AuditLog.log(
                 user_id=current_user.id,
                 action='application_create',
                 resource_type='application',
                 resource_id=app_name,
-                details=f'Created application "{app_name}" on account {account.account_name} (v2 API)',
+                details=details,
                 ip_address=request.remote_addr
             )
 

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Profiling') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Profile a site'), url_for('profiler.new_profile', account_id=profile.account_id)),
+    (_('Profiling'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-3">
+    <h2><i class="bi bi-compass"></i> {{ _('Profiling') }} <code class="fs-5">{{ profile.target_url }}</code></h2>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="mb-3">
+            <div class="d-flex justify-content-between mb-1">
+                <span id="statusMessage">{{ _('Connecting...') }}</span>
+                <span id="progressCount"></span>
+            </div>
+            <div class="progress" style="height: 24px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar"
+                     role="progressbar" style="width: 0%">0%</div>
+            </div>
+        </div>
+
+        <div id="stepsList" class="mt-3">
+            {% for step in steps %}
+            <div class="d-flex align-items-center mb-2" id="step-{{ loop.index }}">
+                <span class="spinner-border spinner-border-sm text-muted me-2 d-none" id="step-spinner-{{ loop.index }}"></span>
+                <i class="bi bi-circle text-muted me-2" id="step-icon-{{ loop.index }}"></i>
+                <span>{{ step.label }}</span>
+                <span class="ms-auto text-muted small" id="step-note-{{ loop.index }}"></span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div id="failArea" class="d-none mt-4">
+            <hr>
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> <span id="failReason">{{ _('Probe failed.') }}</span>
+            </div>
+            <a href="{{ url_for('profiler.new_profile', account_id=profile.account_id) }}"
+               class="btn btn-secondary"><i class="bi bi-arrow-left"></i> {{ _('Try another URL') }}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function() {
+    var sessionId = {{ session_id|tojson }};
+    var resultsUrl = {{ url_for('profiler.profile_results', profile_id=profile.id)|tojson }};
+    var socket = io();
+
+    var STEP_KEYS = [{% for step in steps %}{{ step.key|tojson }}{% if not loop.last %}, {% endif %}{% endfor %}];
+    var stepIndexFor = {};
+    STEP_KEYS.forEach(function(k, i) { stepIndexFor[k] = i + 1; });
+
+    socket.on('connect', function() {
+        socket.emit('join', {room: sessionId});
+        document.getElementById('statusMessage').textContent = {{ _("Starting probe...")|tojson }};
+    });
+
+    function setStepActive(stepNum) {
+        var spinnerEl = document.getElementById('step-spinner-' + stepNum);
+        var iconEl = document.getElementById('step-icon-' + stepNum);
+        if (spinnerEl) spinnerEl.classList.remove('d-none');
+        if (iconEl) iconEl.classList.add('d-none');
+    }
+    function setStepIcon(stepNum, icon, color) {
+        var iconEl = document.getElementById('step-icon-' + stepNum);
+        var spinnerEl = document.getElementById('step-spinner-' + stepNum);
+        if (spinnerEl) spinnerEl.classList.add('d-none');
+        if (iconEl) {
+            iconEl.classList.remove('d-none');
+            iconEl.className = 'bi me-2 ' + icon + ' text-' + color;
+        }
+    }
+    function setStepNote(stepNum, text) {
+        var el = document.getElementById('step-note-' + stepNum);
+        if (el && text) el.textContent = text;
+    }
+
+    function summarize(stepKey, data) {
+        if (!data) return '';
+        if (stepKey === 'dns' && data.addresses) return data.addresses.slice(0, 2).join(', ');
+        if (stepKey === 'tls' && data.version) return data.version + (data.cipher ? ' · ' + data.cipher : '');
+        if (stepKey === 'http_redirect' && data.status) return 'HTTP ' + data.status + (data.redirect_target ? ' → ' + data.redirect_target : '');
+        if (stepKey === 'https_root' && data.status) return 'HTTPS ' + data.status;
+        if (stepKey === 'fingerprint' && data.tech_stack) return data.tech_stack.length ? data.tech_stack.join(', ') : {{ _("none detected")|tojson }};
+        if (stepKey === 'robots') return data.has_robots ? {{ _("present")|tojson }} : {{ _("not found")|tojson }};
+        if (stepKey === 'auth_surface' && data.signals) return data.signals.length ? data.signals.join('; ') : {{ _("public")|tojson }};
+        if (stepKey === 'cdn') return data.cdn || {{ _("none")|tojson }};
+        return '';
+    }
+
+    socket.on('profile_progress', function(data) {
+        var bar = document.getElementById('progressBar');
+        var status = document.getElementById('statusMessage');
+
+        if (data.phase === 'started') {
+            status.textContent = {{ _("Probing...")|tojson }};
+        } else if (data.phase === 'step_start') {
+            setStepActive(data.step);
+            status.textContent = data.step_name + '...';
+            bar.style.width = data.percent + '%';
+            bar.textContent = data.percent + '%';
+        } else if (data.phase === 'step_ok') {
+            setStepIcon(data.step, 'bi-check-circle-fill', 'success');
+            setStepNote(data.step, summarize(data.step_key, data.data));
+            bar.style.width = data.percent + '%';
+            bar.textContent = data.percent + '%';
+        } else if (data.phase === 'step_error') {
+            setStepIcon(data.step, 'bi-x-circle-fill', 'danger');
+            setStepNote(data.step, (data.data && data.data.error) || '');
+        } else if (data.phase === 'step_skip') {
+            setStepIcon(data.step, 'bi-dash-circle', 'muted');
+            setStepNote(data.step, (data.data && data.data.error) || {{ _("skipped")|tojson }});
+        } else if (data.phase === 'completed') {
+            bar.classList.remove('progress-bar-animated');
+            bar.classList.add('bg-success');
+            bar.style.width = '100%';
+            bar.textContent = '100%';
+            status.textContent = {{ _("Complete — loading results...")|tojson }};
+            socket.disconnect();
+            window.location.href = data.redirect_url || resultsUrl;
+        } else if (data.phase === 'error') {
+            bar.classList.remove('progress-bar-animated');
+            bar.classList.add('bg-danger');
+            status.textContent = {{ _("Failed")|tojson }};
+            document.getElementById('failArea').classList.remove('d-none');
+            document.getElementById('failReason').textContent = data.reason || {{ _("Probe failed.")|tojson }};
+            socket.disconnect();
+        }
+    });
+
+    socket.on('connect_error', function() {
+        document.getElementById('statusMessage').textContent = {{ _("Connection lost.")|tojson }};
+    });
+})();
+</script>
+{% endblock %}

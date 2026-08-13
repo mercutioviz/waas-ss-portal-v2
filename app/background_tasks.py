@@ -2,7 +2,9 @@
 
 import logging
 import traceback
-from app import socketio
+from datetime import datetime
+
+from app import db, socketio
 from app.waas_client import WaasApiError
 
 logger = logging.getLogger(__name__)
@@ -142,3 +144,105 @@ def run_clone_operation(session_id, steps):
     }, room=session_id)
 
     return results
+
+
+def run_site_profile(app, profile_id: int, session_id: str, target_url: str) -> None:
+    """Greenlet body: probe `target_url`, persist result, emit progress.
+
+    Signals over SocketIO as `profile_progress` events with the same
+    started / step_start / step_complete / completed / error shape as
+    clone_progress (adapted for our step vocabulary).
+
+    All failure paths — including unhandled exceptions — write a terminal
+    status back to the SiteProfile row so no row is left stuck in 'probing'.
+    """
+    from app.models import SiteProfile
+    from app.profiler.probe import PROBE_STEPS, SsrfRejected, run_probe
+    from app.profiler.recommender import recommend
+    from app.socketio_events import clear_join_signal, pending_join
+
+    with app.app_context():
+        # Wait up to 3s for the browser to join the room before we start
+        # emitting. Falls through anyway so a browser that never connects
+        # doesn't hang the greenlet.
+        try:
+            pending_join(session_id).wait(timeout=3.0)
+        except Exception:  # pragma: no cover — defensive
+            pass
+
+        profile_row = db.session.get(SiteProfile, profile_id)
+        if profile_row is None:
+            logger.error(f'run_site_profile: no SiteProfile with id={profile_id}')
+            clear_join_signal(session_id)
+            return
+
+        profile_row.status = SiteProfile.STATUS_PROBING
+        db.session.commit()
+
+        step_labels = {s.key: s.label for s in PROBE_STEPS}
+        total = len(PROBE_STEPS)
+
+        socketio.emit('profile_progress', {
+            'phase': 'started',
+            'total': total,
+            'target_url': target_url,
+        }, room=session_id)
+
+        # Track step ordering so 'skip' / 'error' events can be positioned
+        # correctly in the UI even when a step is missed entirely.
+        step_index = {s.key: i + 1 for i, s in enumerate(PROBE_STEPS)}
+
+        def _emit(step_key: str, phase: str, data: dict | None = None) -> None:
+            payload = {
+                'phase': f'step_{phase}',
+                'step': step_index.get(step_key, 0),
+                'total': total,
+                'step_key': step_key,
+                'step_name': step_labels.get(step_key, step_key),
+                'percent': int((step_index.get(step_key, 0) / total) * 100),
+            }
+            if data:
+                payload['data'] = data
+            socketio.emit('profile_progress', payload, room=session_id)
+
+        try:
+            profile = run_probe(target_url, emit=_emit)
+            recommendation = recommend(profile)
+
+            profile_row.profile = profile.to_dict()
+            profile_row.recommendation = recommendation
+            profile_row.status = SiteProfile.STATUS_COMPLETE
+            profile_row.completed_at = datetime.utcnow()
+            db.session.commit()
+
+            socketio.emit('profile_progress', {
+                'phase': 'completed',
+                'redirect_url': f'/profiler/{profile_id}/results',
+                'confidence': profile.confidence,
+            }, room=session_id)
+
+        except SsrfRejected as e:
+            profile_row.status = SiteProfile.STATUS_ERROR
+            profile_row.error_message = str(e)
+            profile_row.completed_at = datetime.utcnow()
+            db.session.commit()
+            socketio.emit('profile_progress', {
+                'phase': 'error',
+                'reason': str(e),
+                'category': 'ssrf',
+            }, room=session_id)
+
+        except Exception as e:  # noqa: BLE001 — terminal-state guarantee
+            logger.error(f'run_site_profile error: {traceback.format_exc()}')
+            profile_row.status = SiteProfile.STATUS_ERROR
+            profile_row.error_message = str(e)
+            profile_row.completed_at = datetime.utcnow()
+            db.session.commit()
+            socketio.emit('profile_progress', {
+                'phase': 'error',
+                'reason': str(e),
+                'category': 'internal',
+            }, room=session_id)
+
+        finally:
+            clear_join_signal(session_id)

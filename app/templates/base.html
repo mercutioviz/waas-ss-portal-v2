@@ -34,6 +34,12 @@
                             <i class="bi bi-speedometer2"></i> {{ _('Dashboard') }}
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if ep.startswith('profiler.') %}active{% endif %}"
+                           href="{{ url_for('profiler.new_profile') }}">
+                            <i class="bi bi-compass"></i> {{ _('New site') }}
+                        </a>
+                    </li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle {% if ep.startswith('accounts.') or ep.startswith('applications.') or ep.startswith('certificates.') %}active{% endif %}"
                            href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
