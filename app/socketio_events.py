@@ -52,13 +52,16 @@ def handle_join(data):
     room = data.get('room')
     if room and current_user.is_authenticated:
         join_room(room)
-        logger.debug(f'User {current_user.username} joined room {room}')
+        # Bumped from debug to info so we can verify from production logs
+        # that the browser actually joined the room a greenlet is emitting to.
+        logger.info(f'socketio: user={current_user.username} joined room={room}')
         emit('joined', {'room': room})
         # If a background greenlet is waiting for this room to be joined
         # before starting to emit, release it now.
         pending = _JOIN_SIGNALS.get(room)
         if pending is not None:
             pending.set()
+            logger.info(f'socketio: released pending_join for room={room}')
 
 
 @socketio.on('leave')

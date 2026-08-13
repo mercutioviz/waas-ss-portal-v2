@@ -57,16 +57,25 @@
 (function() {
     var sessionId = {{ session_id|tojson }};
     var resultsUrl = {{ url_for('profiler.profile_results', profile_id=profile.id)|tojson }};
-    var socket = io();
+    // Pin to long polling — the WebSocket-upgrade path is fragile under
+    // Flask-SocketIO + gevent-websocket + nginx (silent stalls where the
+    // client hangs mid-upgrade instead of falling back). Polling is
+    // proven reliable in this deployment (login/dashboard already use it).
+    var socket = io({transports: ['polling'], upgrade: false});
 
     var STEP_KEYS = [{% for step in steps %}{{ step.key|tojson }}{% if not loop.last %}, {% endif %}{% endfor %}];
     var stepIndexFor = {};
     STEP_KEYS.forEach(function(k, i) { stepIndexFor[k] = i + 1; });
 
-    socket.on('connect', function() {
+    function joinRoom() {
         socket.emit('join', {room: sessionId});
         document.getElementById('statusMessage').textContent = {{ _("Starting probe...")|tojson }};
-    });
+    }
+
+    // Rejoin on both first connect AND any subsequent reconnect — the
+    // socket.io v4 client fires 'connect' for both, but be explicit.
+    socket.on('connect', joinRoom);
+    socket.io.on('reconnect', joinRoom);
 
     function setStepActive(stepNum) {
         var spinnerEl = document.getElementById('step-spinner-' + stepNum);
