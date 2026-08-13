@@ -94,7 +94,33 @@
         if (stepKey === 'tls' && data.version) return data.version + (data.cipher ? ' · ' + data.cipher : '');
         if (stepKey === 'http_redirect' && data.status) return 'HTTP ' + data.status + (data.redirect_target ? ' → ' + data.redirect_target : '');
         if (stepKey === 'https_root' && data.status) return 'HTTPS ' + data.status;
-        if (stepKey === 'fingerprint' && data.tech_stack) return data.tech_stack.length ? data.tech_stack.join(', ') : {{ _("none detected")|tojson }};
+        if (stepKey === 'security_headers') {
+            var parts = [];
+            if (data.hsts) parts.push('HSTS');
+            if (data.csp) parts.push('CSP');
+            if (data.xfo) parts.push('XFO');
+            return parts.length ? parts.join(' · ') : {{ _("none set")|tojson }};
+        }
+        if (stepKey === 'cookies') {
+            if (!data.count) return {{ _("none")|tojson }};
+            return data.count + ' ' + {{ _("cookies")|tojson }}
+                + (data.insecure_on_https ? ' · ' + data.insecure_on_https + ' ' + {{ _("insecure")|tojson }} : '');
+        }
+        if (stepKey === 'subresources') {
+            if (!data.discovered) return {{ _("none")|tojson }};
+            var summary = data.analyzed + '/' + data.discovered + ' ' + {{ _("URLs")|tojson }};
+            if (data.third_party_hosts) summary += ' · ' + data.third_party_hosts + ' ' + {{ _("3rd-party hosts")|tojson }};
+            return summary;
+        }
+        if (stepKey === 'tech' && data.tech_stack) return data.tech_stack.length ? data.tech_stack.join(', ') : {{ _("none detected")|tojson }};
+        if (stepKey === 'dns_security') {
+            var flags = [];
+            if (data.spf) flags.push('SPF');
+            if (data.dmarc) flags.push('DMARC');
+            if (data.caa) flags.push('CAA');
+            return flags.length ? flags.join(' · ') : {{ _("none set")|tojson }};
+        }
+        if (stepKey === 'bot_mgmt' && data.vendors) return data.vendors.length ? data.vendors.join(', ') : {{ _("none detected")|tojson }};
         if (stepKey === 'robots') return data.has_robots ? {{ _("present")|tojson }} : {{ _("not found")|tojson }};
         if (stepKey === 'auth_surface' && data.signals) return data.signals.length ? data.signals.join('; ') : {{ _("public")|tojson }};
         if (stepKey === 'cdn') return data.cdn || {{ _("none")|tojson }};

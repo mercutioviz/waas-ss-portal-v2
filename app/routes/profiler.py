@@ -185,11 +185,17 @@ def profile_results(profile_id: int):
     recommendation = profile.recommendation or {'form_fields': {}, 'advisories': []}
     form_fields = recommendation.get('form_fields', {})
     advisories = recommendation.get('advisories', [])
+    probe = profile.profile or {}
 
     # Pre-fill the existing ApplicationCreateForm with the recommendation.
     form = ApplicationCreateForm(data={
         key: fld['value'] for key, fld in form_fields.items()
     })
+
+    # Count fields that still need user input (currently just backend_ip).
+    empty_fields = [
+        key for key, fld in form_fields.items() if fld.get('value') in ('', None)
+    ]
 
     return render_template(
         'profiler/results.html',
@@ -197,5 +203,7 @@ def profile_results(profile_id: int):
         form=form,
         form_fields=form_fields,
         advisories=advisories,
+        probe=probe,
+        empty_fields=empty_fields,
         account=profile.account,
     )

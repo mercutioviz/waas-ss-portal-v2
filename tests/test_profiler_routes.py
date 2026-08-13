@@ -265,32 +265,79 @@ class TestStatusEndpoint:
 
 
 class TestResults:
-    def test_renders_prefilled_form(self, logged_in_client, account, db):
-        recommendation = {
-            'form_fields': {
-                'application_name': {'value': 'acme', 'rationale': 'Derived from hostname'},
-                'hostname': {'value': 'acme.example.com', 'rationale': 'The URL you probed'},
-                'backend_ip': {'value': '', 'rationale': 'You must supply the origin'},
-                'backend_port': {'value': 443, 'rationale': 'HTTPS detected'},
-                'backend_type': {'value': 'HTTPS', 'rationale': 'TLS OK'},
-                'malicious_traffic': {'value': 'Passive', 'rationale': 'Start passive'},
-                'use_https': {'value': True, 'rationale': 'TLS works'},
-                'use_http': {'value': True, 'rationale': 'legacy links'},
-                'redirect_http': {'value': True, 'rationale': 'follows the site'},
-            },
-            'advisories': [
-                {'severity': 'info', 'title': 'WordPress detected', 'body': 'Consider a WP template'},
-                {'severity': 'warning', 'title': 'Public IP is Cloudflare', 'body': 'Enter the origin, not the CDN IP'},
-            ],
-        }
+    def _make_row(self, account, db, *, recommendation=None, probe=None):
         row = SiteProfile(
             user_id=account.user_id, account_id=account.id,
             target_url='https://acme.example.com/',
             status=SiteProfile.STATUS_COMPLETE,
-            session_id='room-r',
+            session_id='room-r-' + str(id(recommendation)),
         )
-        row.recommendation = recommendation
+        if recommendation is not None:
+            row.recommendation = recommendation
+        if probe is not None:
+            row.profile = probe
         db.session.add(row); db.session.commit()
+        return row
+
+    def _sample_recommendation(self):
+        # description alongside rationale — phase 2.5 shape
+        f = lambda v, r: {'value': v, 'description': 'what it does', 'rationale': r}
+        return {
+            'form_fields': {
+                'application_name': f('acme', 'Derived from hostname'),
+                'hostname': f('acme.example.com', 'The URL you probed'),
+                'backend_ip': f('', 'You must supply the origin'),
+                'backend_port': f(443, 'HTTPS detected'),
+                'backend_type': f('HTTPS', 'TLS OK'),
+                'malicious_traffic': f('Passive', 'Start passive'),
+                'use_https': f(True, 'TLS works'),
+                'use_http': f(True, 'legacy links'),
+                'redirect_http': f(True, 'follows the site'),
+            },
+            'advisories': [
+                {'severity': 'info', 'title': 'WordPress detected', 'body': 'Consider a WP template'},
+                {'severity': 'warning', 'title': 'HSTS missing', 'body': 'no Strict-Transport-Security'},
+            ],
+        }
+
+    def _sample_probe(self):
+        return {
+            'target_url': 'https://acme.example.com/',
+            'confidence': 'high',
+            'dns': {'hostname': 'acme.example.com', 'addresses': ['93.184.216.34']},
+            'tls': {'handshake_ok': True, 'tls_version': 'TLSv1.3', 'cipher': 'TLS_AES_256_GCM_SHA384'},
+            'http_root': {'status': 301, 'redirect_target': 'https://acme.example.com/'},
+            'https_root': {'status': 200, 'headers': {'Content-Type': 'text/html'}},
+            'security_headers': {
+                'hsts': None,
+                'csp': {'directive_count': 3, 'has_unsafe_inline': False, 'has_unsafe_eval': False},
+                'x_frame_options': 'DENY',
+                'x_content_type_options': 'nosniff',
+                'referrer_policy': 'no-referrer',
+                'permissions_policy': None, 'coop': None, 'coep': None, 'corp': None,
+            },
+            'cookies': [
+                {'name': 'session', 'secure': True, 'http_only': True, 'same_site': 'Lax',
+                 'domain': None, 'path': '/', 'max_age': None, 'expires': None,
+                 'is_session': True, 'third_party': False},
+            ],
+            'subresources': {
+                'discovered_count': 42, 'analyzed_count': 30, 'total_bytes_estimate': 2560000,
+                'first_party_count': 20, 'third_party_count': 10,
+                'by_third_party_host': {'cdn.jsdelivr.net': {'count': 5, 'bytes': 512000}},
+                'truncated': True, 'budget_exceeded': False, 'hits': [],
+            },
+            'tech_stack': [
+                {'name': 'nginx', 'category': 'Web server', 'source': 'header'},
+                {'name': 'WordPress', 'category': 'CMS', 'source': 'body'},
+            ],
+            'dns_security': {'spf': 'v=spf1 -all', 'dmarc': 'v=DMARC1; p=reject',
+                             'caa': ['0 issue "letsencrypt.org"'], 'mx_present': True},
+            'bot_management': [{'name': 'reCAPTCHA', 'evidence': 'www.google.com'}],
+        }
+
+    def test_renders_prefilled_form(self, logged_in_client, account, db):
+        row = self._make_row(account, db, recommendation=self._sample_recommendation())
 
         resp = logged_in_client.get(f'/profiler/{row.id}/results')
         assert resp.status_code == 200
@@ -299,10 +346,52 @@ class TestResults:
         assert b'value="acme.example.com"' in resp.data
         # Advisory titles surface
         assert b'WordPress detected' in resp.data
-        assert b'Public IP is Cloudflare' in resp.data
+        assert b'HSTS missing' in resp.data
         # Hidden profile_id present for audit-source tagging on submit
         assert f'value="{row.id}"'.encode() in resp.data
         assert b'name="profile_id"' in resp.data
+        # Three-section headings
+        assert b'What we saw' in resp.data
+        assert b'Advisories' in resp.data
+        assert b'Suggested WaaS configuration' in resp.data
+        # Config summary sidebar
+        assert b'Config summary' in resp.data
+
+    def test_renders_findings_from_probe_data(self, logged_in_client, account, db):
+        row = self._make_row(
+            account, db,
+            recommendation=self._sample_recommendation(),
+            probe=self._sample_probe(),
+        )
+        resp = logged_in_client.get(f'/profiler/{row.id}/results')
+        assert resp.status_code == 200
+        # Basic card — TLS version + resolved IP surface
+        assert b'TLSv1.3' in resp.data
+        assert b'93.184.216.34' in resp.data
+        # Traffic card
+        assert b'URLs found' in resp.data
+        # Third parties card lists the host
+        assert b'cdn.jsdelivr.net' in resp.data
+        # Tech stack surfaces both entries
+        assert b'nginx' in resp.data
+        assert b'WordPress' in resp.data
+        # Security headers card lists standard headers by name
+        assert b'Strict-Transport-Security' in resp.data
+        assert b'X-Frame-Options' in resp.data
+        # Cookies card shows the cookie
+        assert b'>session</code>' in resp.data or b'session' in resp.data
+        # DNS security card labels
+        assert b'DMARC' in resp.data
+        # Bot management surfaces vendor name
+        assert b'reCAPTCHA' in resp.data
+
+    def test_empty_field_prompts_are_visible(self, logged_in_client, account, db):
+        rec = self._sample_recommendation()
+        # backend_ip is empty by design → results page should flag it
+        row = self._make_row(account, db, recommendation=rec)
+        resp = logged_in_client.get(f'/profiler/{row.id}/results')
+        # Summary bar mentions "need your input"
+        assert b'need your input' in resp.data
 
     def test_incomplete_profile_bounces_to_watch(self, logged_in_client, account, db):
         row = SiteProfile(

@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% from "macros/page.html" import breadcrumbs %}
-{% from "macros/forms.html" import render_field %}
 {% block title %}{{ _('Review suggested config') }} — WaaS Portal{% endblock %}
 
 {% block breadcrumbs %}
@@ -11,137 +10,505 @@
 ]) }}
 {% endblock %}
 
+{# ── Rationale popover — dynamic per-probe "why we picked this value" ── #}
 {% macro rationale(field_key) -%}
     {%- set rec = form_fields.get(field_key) -%}
     {%- if rec and rec.rationale -%}
-        <span class="ms-1 text-muted"
+        <span class="ms-1 text-primary" style="cursor:help"
               data-bs-toggle="popover" data-bs-trigger="hover focus"
-              data-bs-placement="right" data-bs-content="{{ rec.rationale }}"
+              data-bs-title="{{ _('Why this value') }}"
+              data-bs-content="{{ rec.rationale }}"
               tabindex="0" role="button" aria-label="{{ _('Why this value') }}">
+            <i class="bi bi-question-circle-fill"></i>
+        </span>
+    {%- endif -%}
+{%- endmacro %}
+
+{# ── Description popover — static "what this setting does" ── #}
+{% macro describe(field_key) -%}
+    {%- set rec = form_fields.get(field_key) -%}
+    {%- if rec and rec.description -%}
+        <span class="ms-1 text-muted" style="cursor:help"
+              data-bs-toggle="popover" data-bs-trigger="hover focus"
+              data-bs-title="{{ _('What this does') }}"
+              data-bs-content="{{ rec.description }}"
+              tabindex="0" role="button" aria-label="{{ _('What this does') }}">
             <i class="bi bi-info-circle"></i>
         </span>
     {%- endif -%}
 {%- endmacro %}
 
+{# ── Section-1 finding-card wrapper ── #}
+{% macro card(id, title, icon, open=false) %}
+<div class="accordion-item">
+    <h2 class="accordion-header">
+        <button class="accordion-button{% if not open %} collapsed{% endif %}" type="button"
+                data-bs-toggle="collapse" data-bs-target="#finding-{{ id }}">
+            <i class="bi bi-{{ icon }} me-2"></i> {{ title }}
+        </button>
+    </h2>
+    <div id="finding-{{ id }}" class="accordion-collapse collapse{% if open %} show{% endif %}">
+        <div class="accordion-body">
+            {{ caller() }}
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
 {% block content %}
-<div class="mt-4 mb-3">
-    <h2><i class="bi bi-check2-square"></i> {{ _('Review suggested config') }}</h2>
-    <p class="text-muted mb-0">
-        {{ _('Probed') }} <code>{{ profile.target_url }}</code>
-        · {{ _('Account:') }} <strong>{{ account.account_name }}</strong>
+{% set tls = probe.get('tls', {}) %}
+{% set dns = probe.get('dns', {}) %}
+{% set https_root = probe.get('https_root', {}) %}
+{% set http_root = probe.get('http_root', {}) %}
+{% set sec = probe.get('security_headers', {}) %}
+{% set cookies = probe.get('cookies', []) %}
+{% set sub = probe.get('subresources', {}) %}
+{% set tech = probe.get('tech_stack', []) %}
+{% set dns_sec = probe.get('dns_security', {}) %}
+{% set bots = probe.get('bot_management', []) %}
+
+<div class="mt-4 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h2 class="mb-0"><i class="bi bi-check2-square"></i> {{ _('Profile results') }}</h2>
+        <div class="text-muted small mt-1">
+            {{ _('Probed') }} <code>{{ probe.get('target_url', profile.target_url) }}</code>
+            &middot; {{ _('Account:') }} <strong>{{ account.account_name }}</strong>
+            &middot;
+            <span class="badge {% if probe.get('confidence') == 'high' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                {{ _('confidence:') }} {{ probe.get('confidence', 'unknown') }}
+            </span>
+        </div>
+    </div>
+    <a href="{{ url_for('profiler.new_profile', account_id=account.id) }}"
+       class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-clockwise"></i> {{ _('Profile another URL') }}
+    </a>
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════
+   Section 1 — What we saw (findings accordion)
+   ═══════════════════════════════════════════════════════════════════ #}
+<h4 class="text-uppercase text-muted small fw-bold mt-4 mb-2">
+    <i class="bi bi-1-circle"></i> {{ _('What we saw') }}
+</h4>
+
+<div class="accordion mb-4" id="findingsAccordion">
+
+    {# ── Basic ── #}
+    {% call card('basic', _('Basic'), 'globe', open=true) %}
+    <dl class="row mb-0">
+        <dt class="col-sm-4">{{ _('Hostname') }}</dt>
+        <dd class="col-sm-8"><code>{{ dns.get('hostname', '—') }}</code></dd>
+        <dt class="col-sm-4">{{ _('Resolved IPs') }}</dt>
+        <dd class="col-sm-8">
+            {% for ip in dns.get('addresses', []) %}<code>{{ ip }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+            {% if probe.get('cdn') %} <span class="badge bg-warning text-dark">{{ probe.get('cdn') }}</span>{% endif %}
+        </dd>
+        <dt class="col-sm-4">{{ _('TLS') }}</dt>
+        <dd class="col-sm-8">
+            {% if tls.get('handshake_ok') %}
+                <code>{{ tls.get('tls_version') }}</code>
+                {% if tls.get('cipher') %}<span class="text-muted">· {{ tls.get('cipher') }}</span>{% endif %}
+            {% else %}
+                <span class="text-danger">{{ _('failed') }}: {{ tls.get('error', 'unknown') }}</span>
+            {% endif %}
+        </dd>
+        {% if tls.get('cert_subject') %}
+        <dt class="col-sm-4">{{ _('Cert subject') }}</dt>
+        <dd class="col-sm-8"><code>{{ tls.cert_subject }}</code></dd>
+        <dt class="col-sm-4">{{ _('Cert expires') }}</dt>
+        <dd class="col-sm-8">{{ tls.get('cert_not_after', '—') }}</dd>
+        {% endif %}
+        <dt class="col-sm-4">{{ _('HTTP → HTTPS redirect') }}</dt>
+        <dd class="col-sm-8">
+            {% if http_root.get('status') in [301, 302, 307, 308] %}
+                <span class="text-success">✓ {{ http_root.status }} → <code>{{ http_root.get('redirect_target', '') }}</code></span>
+            {% elif http_root.get('status') %}
+                <span class="text-warning">{{ _('no redirect') }} (HTTP {{ http_root.status }})</span>
+            {% else %}
+                <span class="text-muted">—</span>
+            {% endif %}
+        </dd>
+        <dt class="col-sm-4">{{ _('Landing content-type') }}</dt>
+        <dd class="col-sm-8"><code>{{ https_root.get('headers', {}).get('Content-Type', '—') }}</code></dd>
+    </dl>
+    {% endcall %}
+
+    {# ── Traffic ── #}
+    {% call card('traffic', _('Traffic'), 'bar-chart-line') %}
+    {% if sub.get('discovered_count', 0) == 0 %}
+        <p class="text-muted mb-0">
+            {{ _('No subresources discovered in the landing HTML — either the page is truly bare, or content loads via JavaScript we did not execute.') }}
+        </p>
+    {% else %}
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-md-3">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-4 fw-semibold">{{ sub.discovered_count }}</div>
+                <div class="text-muted small">{{ _('URLs found') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-4 fw-semibold">{{ sub.analyzed_count }}</div>
+                <div class="text-muted small">{{ _('probed') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-4 fw-semibold">
+                    {% if sub.total_bytes_estimate %}~{{ (sub.total_bytes_estimate / 1024)|round|int }} KB{% else %}—{% endif %}
+                </div>
+                <div class="text-muted small">{{ _('total (est.)') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-4 fw-semibold">{{ sub.third_party_count }}</div>
+                <div class="text-muted small">{{ _('third-party hits') }}</div>
+            </div>
+        </div>
+    </div>
+    {% if sub.get('truncated') %}
+        <div class="alert alert-info py-2 small mb-2">
+            <i class="bi bi-info-circle"></i>
+            {{ _('The page references %(total)s subresources; we analyzed the first %(analyzed)s.',
+                 total=sub.discovered_count, analyzed=sub.analyzed_count) }}
+        </div>
+    {% endif %}
+    {% if sub.get('budget_exceeded') %}
+        <div class="alert alert-warning py-2 small mb-0">
+            <i class="bi bi-clock-history"></i>
+            {{ _('Subresource fetching hit its wall-clock cap — some results may be missing.') }}
+        </div>
+    {% endif %}
+    {% endif %}
+    {% endcall %}
+
+    {# ── Third parties ── #}
+    {% if sub.get('by_third_party_host') %}
+    {% call card('third_parties', _('Third parties'), 'diagram-3') %}
+    <p class="text-muted small mb-2">
+        {{ _('Distinct external hosts the landing page pulls from. Each is a trust boundary.') }}
     </p>
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>{{ _('Host') }}</th>
+                <th class="text-end">{{ _('Requests') }}</th>
+                <th class="text-end">{{ _('Bytes (est.)') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for host, stats in sub.by_third_party_host.items()|sort(attribute='1.count', reverse=true) %}
+            <tr>
+                <td><code>{{ host }}</code></td>
+                <td class="text-end">{{ stats.count }}</td>
+                <td class="text-end">
+                    {% if stats.bytes %}~{{ (stats.bytes / 1024)|round|int }} KB{% else %}—{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endcall %}
+    {% endif %}
+
+    {# ── Technologies ── #}
+    {% if tech %}
+    {% call card('tech', _('Technologies'), 'stack') %}
+    {% set by_category = {} %}
+    {% for t in tech %}
+        {% set cat = t.get('category') or 'Other' %}
+        {% if by_category.update({cat: by_category.get(cat, []) + [t.get('name')]}) %}{% endif %}
+    {% endfor %}
+    {% for cat, names in by_category.items()|sort %}
+    <div class="mb-2">
+        <div class="text-uppercase text-muted small fw-semibold">{{ cat }}</div>
+        <div>
+            {% for name in names|unique %}<span class="badge bg-secondary me-1 mb-1">{{ name }}</span>{% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+    {% endcall %}
+    {% endif %}
+
+    {# ── Security headers ── #}
+    {% call card('sec_headers', _('Security headers'), 'shield-lock') %}
+    {% set rows = [
+        ('Strict-Transport-Security', sec.get('hsts')),
+        ('Content-Security-Policy', sec.get('csp')),
+        ('X-Frame-Options', sec.get('x_frame_options')),
+        ('X-Content-Type-Options', sec.get('x_content_type_options')),
+        ('Referrer-Policy', sec.get('referrer_policy')),
+        ('Permissions-Policy', sec.get('permissions_policy')),
+        ('Cross-Origin-Opener-Policy', sec.get('coop')),
+        ('Cross-Origin-Embedder-Policy', sec.get('coep')),
+        ('Cross-Origin-Resource-Policy', sec.get('corp')),
+    ] %}
+    <table class="table table-sm mb-0">
+        <thead>
+            <tr><th>{{ _('Header') }}</th><th>{{ _('Status') }}</th></tr>
+        </thead>
+        <tbody>
+            {% for name, val in rows %}
+            <tr>
+                <td><code>{{ name }}</code></td>
+                <td>
+                    {% if val is none %}
+                        <span class="text-danger">✗ {{ _('missing') }}</span>
+                    {% elif val is mapping %}
+                        <span class="text-success">✓</span>
+                        {% if val.get('max_age') is not none %}max-age={{ val.max_age }}{% endif %}
+                        {% if val.get('include_subdomains') %} · includeSubDomains{% endif %}
+                        {% if val.get('preload') %} · preload{% endif %}
+                        {% if val.get('directive_count') is not none %}
+                            {{ val.directive_count }} {{ _('directives') }}
+                            {% if val.get('has_unsafe_inline') %} · <span class="text-warning">unsafe-inline</span>{% endif %}
+                            {% if val.get('has_unsafe_eval') %} · <span class="text-warning">unsafe-eval</span>{% endif %}
+                        {% endif %}
+                    {% else %}
+                        <span class="text-success">✓</span> <code>{{ val }}</code>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endcall %}
+
+    {# ── Cookies ── #}
+    {% if cookies %}
+    {% call card('cookies', _('Cookies') ~ ' (' ~ cookies|length ~ ')', 'cookie') %}
+    <table class="table table-sm mb-0">
+        <thead>
+            <tr>
+                <th>{{ _('Name') }}</th>
+                <th>Secure</th>
+                <th>HttpOnly</th>
+                <th>SameSite</th>
+                <th>{{ _('Scope') }}</th>
+                <th>{{ _('Lifetime') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in cookies %}
+            <tr>
+                <td><code>{{ c.name }}</code>{% if c.third_party %} <span class="badge bg-warning text-dark">3rd</span>{% endif %}</td>
+                <td>{% if c.secure %}<span class="text-success">✓</span>{% else %}<span class="text-danger">✗</span>{% endif %}</td>
+                <td>{% if c.http_only %}<span class="text-success">✓</span>{% else %}<span class="text-danger">✗</span>{% endif %}</td>
+                <td>{% if c.same_site %}<code>{{ c.same_site }}</code>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>{% if c.domain %}<code class="small">{{ c.domain }}</code>{% else %}<span class="text-muted">host</span>{% endif %}</td>
+                <td>{% if c.is_session %}{{ _('session') }}{% elif c.max_age %}max-age={{ c.max_age }}{% else %}{{ c.expires }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endcall %}
+    {% endif %}
+
+    {# ── DNS security ── #}
+    {% call card('dns_security', _('DNS security'), 'diagram-2') %}
+    <dl class="row mb-0">
+        <dt class="col-sm-3">MX</dt>
+        <dd class="col-sm-9">
+            {% if dns_sec.get('mx_present') %}<span class="text-success">✓ {{ _('present') }}</span>
+            {% else %}<span class="text-muted">— {{ _('none') }}</span>{% endif %}
+        </dd>
+        <dt class="col-sm-3">SPF</dt>
+        <dd class="col-sm-9">
+            {% if dns_sec.get('spf') %}<code class="small">{{ dns_sec.spf }}</code>
+            {% else %}<span class="text-danger">✗ {{ _('missing') }}</span>{% endif %}
+        </dd>
+        <dt class="col-sm-3">DMARC</dt>
+        <dd class="col-sm-9">
+            {% if dns_sec.get('dmarc') %}<code class="small">{{ dns_sec.dmarc }}</code>
+            {% else %}<span class="text-danger">✗ {{ _('missing') }}</span>{% endif %}
+        </dd>
+        <dt class="col-sm-3">CAA</dt>
+        <dd class="col-sm-9">
+            {% if dns_sec.get('caa') %}
+                {% for r in dns_sec.caa %}<div><code class="small">{{ r }}</code></div>{% endfor %}
+            {% else %}<span class="text-danger">✗ {{ _('missing') }}</span>{% endif %}
+        </dd>
+    </dl>
+    {% endcall %}
+
+    {# ── Bot management (only if we found any) ── #}
+    {% if bots %}
+    {% call card('bots', _('Bot management'), 'robot') %}
+    <ul class="list-unstyled mb-0">
+        {% for b in bots %}
+        <li class="mb-1">
+            <span class="badge bg-info text-dark">{{ b.name }}</span>
+            <span class="text-muted small">via <code>{{ b.evidence }}</code></span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endcall %}
+    {% endif %}
+
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════
+   Section 2 — Advisories
+   ═══════════════════════════════════════════════════════════════════ #}
+<h4 class="text-uppercase text-muted small fw-bold mt-4 mb-2">
+    <i class="bi bi-2-circle"></i> {{ _('Advisories') }}
+    {% if advisories %}<span class="badge bg-secondary">{{ advisories|length }}</span>{% endif %}
+</h4>
+
+<div class="mb-4">
+{% if advisories %}
+    {# Severity-sorted: warning first, then info #}
+    {% for adv in advisories|sort(attribute='severity') %}
+    <div class="alert alert-{{ 'warning' if adv.severity == 'warning' else ('danger' if adv.severity == 'error' else 'info') }} py-2 mb-2">
+        <div class="fw-semibold mb-1">
+            {% if adv.severity == 'warning' %}<i class="bi bi-exclamation-triangle"></i>
+            {% elif adv.severity == 'error' %}<i class="bi bi-x-circle"></i>
+            {% else %}<i class="bi bi-info-circle"></i>{% endif %}
+            {{ adv.title }}
+        </div>
+        <div class="small mb-0">{{ adv.body }}</div>
+        {% if adv.action %}
+        <a href="{{ adv.action.url }}" class="btn btn-sm btn-outline-secondary mt-2">{{ adv.action.label }}</a>
+        {% endif %}
+    </div>
+    {% endfor %}
+{% else %}
+    <p class="text-muted mb-0">{{ _('No advisories — the site looks clean.') }}</p>
+{% endif %}
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════
+   Section 3 — Suggested WaaS configuration
+   ═══════════════════════════════════════════════════════════════════ #}
+<h4 class="text-uppercase text-muted small fw-bold mt-4 mb-2">
+    <i class="bi bi-3-circle"></i> {{ _('Suggested WaaS configuration') }}
+</h4>
+
+{% set filled_count = form_fields|length - empty_fields|length %}
+<div class="alert alert-primary py-2 small mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <i class="bi bi-magic"></i>
+        {{ _('%(filled)s of %(total)s fields auto-filled from probe',
+             filled=filled_count, total=form_fields|length) }}
+        {% if empty_fields %}
+            &middot; <strong>{{ empty_fields|length }} {{ _('need your input') }}</strong>
+        {% endif %}
+    </div>
+    {% if empty_fields %}
+    <a href="#field-{{ empty_fields[0] }}" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-arrow-down"></i> {{ _('Jump to first empty field') }}
+    </a>
+    {% endif %}
 </div>
 
 <div class="row">
-    <div class="col-lg-7">
-        <div class="card">
-            <div class="card-header"><h5 class="mb-0">{{ _('Suggested application settings') }}</h5></div>
-            <div class="card-body">
-                <form method="POST"
-                      action="{{ url_for('applications.create_application', account_id=account.id) }}"
-                      data-loading="{{ _('Creating application...') }}">
-                    {{ form.hidden_tag() }}
-                    <input type="hidden" name="profile_id" value="{{ profile.id }}">
+<div class="col-lg-8">
+<div class="card">
+    <div class="card-header"><h5 class="mb-0">{{ _('Create application') }}</h5></div>
+    <div class="card-body">
+        <form method="POST"
+              action="{{ url_for('applications.create_application', account_id=account.id) }}"
+              data-loading="{{ _('Creating application...') }}">
+            {{ form.hidden_tag() }}
+            <input type="hidden" name="profile_id" value="{{ profile.id }}">
 
-                    <div class="mb-3">
-                        {{ form.application_name.label(class="form-label") }}{{ rationale('application_name') }}
-                        {{ form.application_name(class="form-control") }}
-                    </div>
-
-                    <div class="mb-3">
-                        {{ form.hostname.label(class="form-label") }}{{ rationale('hostname') }}
-                        {{ form.hostname(class="form-control") }}
-                    </div>
-
-                    <hr>
-                    <h6 class="text-muted mb-3">{{ _('Backend Server') }}</h6>
-
-                    <div class="mb-3">
-                        {{ form.backend_ip.label(class="form-label") }}{{ rationale('backend_ip') }}
-                        {{ form.backend_ip(class="form-control", placeholder=_('e.g., 10.0.0.1 or origin.example.com')) }}
-                        <div class="form-text text-warning">
-                            <i class="bi bi-exclamation-triangle"></i>
-                            {{ _('You must fill this in — it cannot be probed from the public URL.') }}
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            {{ form.backend_port.label(class="form-label") }}{{ rationale('backend_port') }}
-                            {{ form.backend_port(class="form-control") }}
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            {{ form.backend_type.label(class="form-label") }}{{ rationale('backend_type') }}
-                            {{ form.backend_type(class="form-select") }}
-                        </div>
-                    </div>
-
-                    <hr>
-                    <h6 class="text-muted mb-3">{{ _('Security & Endpoints') }}</h6>
-
-                    <div class="mb-3">
-                        {{ form.malicious_traffic.label(class="form-label") }}{{ rationale('malicious_traffic') }}
-                        {{ form.malicious_traffic(class="form-select") }}
-                    </div>
-
-                    <div class="card bg-light mb-3">
-                        <div class="card-body py-2">
-                            <div class="form-check mb-2">
-                                {{ form.use_https() }}
-                                <label class="form-check-label" for="use_https">{{ _('Create HTTPS endpoint (port 443)') }}</label>
-                                {{ rationale('use_https') }}
-                            </div>
-                            <div class="form-check mb-2">
-                                {{ form.use_http() }}
-                                <label class="form-check-label" for="use_http">{{ _('Create HTTP endpoint (port 80)') }}</label>
-                                {{ rationale('use_http') }}
-                            </div>
-                            <div class="form-check">
-                                {{ form.redirect_http() }}
-                                <label class="form-check-label" for="redirect_http">{{ _('Redirect HTTP to HTTPS') }}</label>
-                                {{ rationale('redirect_http') }}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="d-flex gap-2 mt-4">
-                        {{ form.submit() }}
-                        <a href="{{ url_for('profiler.new_profile', account_id=account.id) }}"
-                           class="btn btn-outline-secondary">{{ _('Profile a different URL') }}</a>
-                    </div>
-                </form>
+            <div class="mb-3" id="field-application_name">
+                {{ form.application_name.label(class="form-label") }}{{ describe('application_name') }}{{ rationale('application_name') }}
+                {{ form.application_name(class="form-control") }}
             </div>
-        </div>
-    </div>
 
-    <div class="col-lg-5">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-lightbulb"></i> {{ _('What we noticed') }}</h5>
+            <div class="mb-3" id="field-hostname">
+                {{ form.hostname.label(class="form-label") }}{{ describe('hostname') }}{{ rationale('hostname') }}
+                {{ form.hostname(class="form-control") }}
             </div>
-            <div class="card-body">
-                {% if advisories %}
-                    {% for adv in advisories %}
-                    <div class="alert alert-{{ 'warning' if adv.severity == 'warning' else ('danger' if adv.severity == 'error' else 'info') }} py-2">
-                        <div class="fw-semibold mb-1">
-                            {% if adv.severity == 'warning' %}<i class="bi bi-exclamation-triangle"></i>
-                            {% elif adv.severity == 'error' %}<i class="bi bi-x-circle"></i>
-                            {% else %}<i class="bi bi-info-circle"></i>{% endif %}
-                            {{ adv.title }}
-                        </div>
-                        <div class="small mb-0">{{ adv.body }}</div>
-                        {% if adv.action %}
-                        <a href="{{ adv.action.url }}" class="btn btn-sm btn-outline-secondary mt-2">{{ adv.action.label }}</a>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <p class="text-muted small mb-0">{{ _('No advisories — the site looks clean.') }}</p>
+
+            <hr>
+            <h6 class="text-muted mb-3">{{ _('Backend Server') }}</h6>
+
+            <div class="mb-3" id="field-backend_ip">
+                {{ form.backend_ip.label(class="form-label") }}{{ describe('backend_ip') }}{{ rationale('backend_ip') }}
+                {{ form.backend_ip(class="form-control", placeholder=_('e.g., 10.0.0.1 or origin.example.com')) }}
+                {% if 'backend_ip' in empty_fields %}
+                <div class="form-text text-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    {{ _('You must fill this in — it cannot be probed from the public URL.') }}
+                </div>
                 {% endif %}
             </div>
-        </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3" id="field-backend_port">
+                    {{ form.backend_port.label(class="form-label") }}{{ describe('backend_port') }}{{ rationale('backend_port') }}
+                    {{ form.backend_port(class="form-control") }}
+                </div>
+                <div class="col-md-6 mb-3" id="field-backend_type">
+                    {{ form.backend_type.label(class="form-label") }}{{ describe('backend_type') }}{{ rationale('backend_type') }}
+                    {{ form.backend_type(class="form-select") }}
+                </div>
+            </div>
+
+            <hr>
+            <h6 class="text-muted mb-3">{{ _('Security & Endpoints') }}</h6>
+
+            <div class="mb-3" id="field-malicious_traffic">
+                {{ form.malicious_traffic.label(class="form-label") }}{{ describe('malicious_traffic') }}{{ rationale('malicious_traffic') }}
+                {{ form.malicious_traffic(class="form-select") }}
+            </div>
+
+            <div class="card bg-light mb-3">
+                <div class="card-body py-2">
+                    <div class="form-check mb-2" id="field-use_https">
+                        {{ form.use_https() }}
+                        <label class="form-check-label" for="use_https">{{ _('Create HTTPS endpoint (port 443)') }}</label>
+                        {{ describe('use_https') }}{{ rationale('use_https') }}
+                    </div>
+                    <div class="form-check mb-2" id="field-use_http">
+                        {{ form.use_http() }}
+                        <label class="form-check-label" for="use_http">{{ _('Create HTTP endpoint (port 80)') }}</label>
+                        {{ describe('use_http') }}{{ rationale('use_http') }}
+                    </div>
+                    <div class="form-check" id="field-redirect_http">
+                        {{ form.redirect_http() }}
+                        <label class="form-check-label" for="redirect_http">{{ _('Redirect HTTP to HTTPS') }}</label>
+                        {{ describe('redirect_http') }}{{ rationale('redirect_http') }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 mt-4">
+                {{ form.submit() }}
+                <a href="{{ url_for('profiler.new_profile', account_id=account.id) }}"
+                   class="btn btn-outline-secondary">{{ _('Profile a different URL') }}</a>
+            </div>
+        </form>
     </div>
 </div>
+</div>
+
+<div class="col-lg-4">
+<div class="card">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-list-check"></i> {{ _('Config summary') }}</h5></div>
+    <div class="card-body small">
+        <p class="text-muted mb-2">{{ _('Linear scan of every recommendation:') }}</p>
+        <dl class="mb-0">
+            {% for key, rec in form_fields.items() %}
+            <dt><code>{{ key }}</code>:
+                {% if rec.value == true %}<span class="text-success">true</span>
+                {% elif rec.value == false %}<span class="text-muted">false</span>
+                {% elif rec.value == '' %}<span class="text-warning">—</span>
+                {% else %}<code>{{ rec.value }}</code>{% endif %}
+            </dt>
+            <dd class="mb-2 text-muted">{{ rec.rationale }}</dd>
+            {% endfor %}
+        </dl>
+    </div>
+</div>
+</div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
