@@ -3,7 +3,7 @@
 import pytest
 
 from app.profiler.recommender import ALLOWED_FORM_FIELDS, recommend
-from app.profiler.schemas import DnsResult, HttpResult, SiteProfile, TlsResult
+from app.profiler.schemas import DnsResult, HttpResult, SiteProfile, TechDetection, TlsResult
 
 
 def _profile(
@@ -39,7 +39,10 @@ def _profile(
             cookies=dict(https_cookies or {}),
             body_snippet=https_body,
         ),
-        tech_stack=list(tech_stack),
+        tech_stack=[
+            t if isinstance(t, TechDetection) else TechDetection(name=t, category='', source='test')
+            for t in tech_stack
+        ],
         cdn=cdn,
         confidence=confidence,
     )

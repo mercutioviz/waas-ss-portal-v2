@@ -114,7 +114,7 @@ class TestHappyPath:
         assert profile.http_root.status == 301
         assert profile.http_root.redirect_target == 'https://example.com/'
         assert profile.https_root.status == 200
-        assert 'nginx' in profile.tech_stack
+        assert 'nginx' in profile.tech_names
         assert profile.robots_txt.startswith('User-agent:')
         assert profile.confidence == 'high'
 
@@ -127,7 +127,7 @@ class TestHappyPath:
         http.get('https://example.com/robots.txt', status_code=404)
 
         profile = run_probe('https://example.com/')
-        assert 'WordPress' in profile.tech_stack
+        assert 'WordPress' in profile.tech_names
 
 
 class TestLowConfidenceOutcomes:
@@ -164,7 +164,7 @@ class TestCdnDetection:
 
         profile = run_probe('https://acme.com/')
         assert profile.cdn == 'Cloudflare'
-        assert 'Cloudflare' in profile.tech_stack
+        assert 'Cloudflare' in profile.tech_names
 
 
 class TestUrlNormalization:

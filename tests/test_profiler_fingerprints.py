@@ -5,48 +5,56 @@ import pytest
 from app.profiler.fingerprints import identify_tech, is_cdn_ip
 
 
+def _names(detections):
+    """Extract just the tech names from a list of TechDetection objects."""
+    return [t.name for t in detections]
+
+
 class TestIdentifyTech:
     def test_nginx_via_server_header(self):
         result = identify_tech({'Server': 'nginx/1.24.0'}, {}, '')
-        assert 'nginx' in result
+        assert 'nginx' in _names(result)
 
     def test_apache_via_server_header_case_insensitive(self):
         result = identify_tech({'server': 'Apache/2.4.58'}, {}, '')
-        assert 'Apache' in result
+        assert 'Apache' in _names(result)
 
     def test_php_via_x_powered_by(self):
         result = identify_tech({'X-Powered-By': 'PHP/8.2'}, {}, '')
-        assert 'PHP' in result
+        assert 'PHP' in _names(result)
 
     def test_wordpress_via_body(self):
         body = '<link rel="stylesheet" href="/wp-content/themes/twenty/style.css">'
         result = identify_tech({}, {}, body)
-        assert 'WordPress' in result
+        assert 'WordPress' in _names(result)
 
     def test_wordpress_via_cookie_prefix(self):
         cookies = {'wordpress_logged_in_abcd1234': 'value'}
         result = identify_tech({}, cookies, '')
-        assert 'WordPress' in result
+        assert 'WordPress' in _names(result)
 
     def test_next_js_via_body(self):
         body = '<script id="__NEXT_DATA__">{"props":{}}</script>'
         result = identify_tech({}, {}, body)
-        assert 'Next.js' in result
+        assert 'Next.js' in _names(result)
 
     def test_cloudflare_via_server_and_cookie(self):
         result = identify_tech(
             {'Server': 'cloudflare'}, {'__cf_bm': 'x'}, '',
         )
-        assert 'Cloudflare' in result
+        assert 'Cloudflare' in _names(result)
 
     def test_dedup(self):
-        # WordPress signalled in both header and body → appears once
+        # WordPress signalled in both header and body — appears once per source,
+        # but only once per name from the same source.
         result = identify_tech(
             {'X-Generator': 'WordPress 6.4'},
             {},
             'wp-content/themes/',
         )
-        assert result.count('WordPress') == 1
+        assert _names(result).count('WordPress') == 2  # once via header, once via body
+        # Category is populated
+        assert all(t.category for t in result if t.name == 'WordPress')
 
     def test_multiple_stacks(self):
         result = identify_tech(
@@ -54,9 +62,25 @@ class TestIdentifyTech:
             {'PHPSESSID': 'x'},
             'wp-content/',
         )
-        assert 'nginx' in result
-        assert 'PHP' in result
-        assert 'WordPress' in result
+        names = _names(result)
+        assert 'nginx' in names
+        assert 'PHP' in names
+        assert 'WordPress' in names
+
+    def test_subresource_matching_finds_analytics(self):
+        result = identify_tech(
+            {}, {}, '',
+            subresource_urls=['https://www.google-analytics.com/analytics.js'],
+        )
+        assert 'Google Analytics' in _names(result)
+        assert any(t.category == 'Analytics' for t in result if t.name == 'Google Analytics')
+
+    def test_subresource_matching_finds_intercom(self):
+        result = identify_tech(
+            {}, {}, '',
+            subresource_urls=['https://widget.intercom.io/widget/xyz.js'],
+        )
+        assert 'Intercom' in _names(result)
 
     def test_empty_input(self):
         assert identify_tech({}, {}, '') == []

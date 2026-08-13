@@ -25,7 +25,14 @@ from urllib.parse import urlparse
 
 import requests
 
-from app.profiler import fingerprints
+from app.profiler import (
+    bot_mgmt,
+    cookie_analysis,
+    dns_security,
+    fingerprints,
+    security_headers,
+    subresources as subresources_mod,
+)
 from app.profiler.schemas import (
     DnsResult,
     HttpResult,
@@ -48,7 +55,12 @@ PROBE_STEPS: list[ProbeStep] = [
     ProbeStep('tls', 'TLS handshake'),
     ProbeStep('http_redirect', 'Checking HTTP → HTTPS redirect'),
     ProbeStep('https_root', 'Fetching landing page'),
-    ProbeStep('fingerprint', 'Fingerprinting stack'),
+    ProbeStep('security_headers', 'Auditing security headers'),
+    ProbeStep('cookies', 'Analyzing cookies'),
+    ProbeStep('subresources', 'Discovering subresources'),
+    ProbeStep('tech', 'Fingerprinting stack'),
+    ProbeStep('dns_security', 'Checking DNS security records'),
+    ProbeStep('bot_mgmt', 'Detecting bot management'),
     ProbeStep('robots', 'Reading robots.txt'),
     ProbeStep('auth_surface', 'Inspecting auth surface'),
     ProbeStep('cdn', 'Checking CDN fronting'),
@@ -162,6 +174,13 @@ def _http_get(url: str, timeout: float, allow_redirects: bool = False) -> HttpRe
         result.status = r.status_code
         result.headers = dict(r.headers)
         result.cookies = {c.name: c.value for c in r.cookies}
+        # `r.headers` collapses duplicate Set-Cookie into one comma-joined
+        # string; urllib3's underlying HTTPHeaderDict keeps them separate.
+        try:
+            result.set_cookie_headers = list(r.raw.headers.getlist('Set-Cookie'))
+        except AttributeError:  # pragma: no cover — non-urllib3 responses
+            raw = r.headers.get('Set-Cookie')
+            result.set_cookie_headers = [raw] if raw else []
         if 'Location' in r.headers:
             result.redirect_target = r.headers['Location']
         content = r.raw.read(MAX_BODY_BYTES, decode_content=True) or b''
@@ -285,16 +304,86 @@ def run_probe(target_url: str, emit: Optional[EmitCallback] = None) -> SiteProfi
         emit('https_root', 'skip', {'error': 'time budget exceeded'})
         return _finalize(profile)
 
-    # 6. Fingerprint
-    emit('fingerprint', 'start')
+    # 6. Security headers (parse from step-5 response)
+    emit('security_headers', 'start')
+    profile.security_headers = security_headers.analyze(profile.https_root.headers)
+    emit('security_headers', 'ok', {
+        'hsts': bool(profile.security_headers.hsts),
+        'csp': bool(profile.security_headers.csp),
+        'xfo': bool(profile.security_headers.x_frame_options),
+    })
+
+    # 7. Cookies (parse Set-Cookie flags)
+    emit('cookies', 'start')
+    primary_ext = subresources_mod._extractor(hostname)
+    primary_domain = f'{primary_ext.domain}.{primary_ext.suffix}' if primary_ext.suffix else hostname
+    profile.cookies = cookie_analysis.analyze(
+        profile.https_root.set_cookie_headers,
+        is_https=parsed.scheme == 'https',
+        primary_domain=primary_domain,
+    )
+    emit('cookies', 'ok', {
+        'count': len(profile.cookies),
+        'insecure_on_https': sum(
+            1 for c in profile.cookies if not c.secure and parsed.scheme == 'https'
+        ),
+    })
+
+    # 8. Subresources — discover from HTML, HEAD-fetch under a wall-clock cap
+    emit('subresources', 'start')
+    if _budget_remaining(deadline) > 3.0:
+        discovered = subresources_mod.discover(
+            profile.https_root.body_snippet or '', target_url,
+        )
+        sub_budget = min(
+            subresources_mod.SUBRESOURCE_BUDGET_SECONDS,
+            _budget_remaining(deadline) - 2.0,   # leave room for later steps
+        )
+        profile.subresources = subresources_mod.fetch_all(
+            discovered, hostname, budget_seconds=sub_budget,
+        )
+        emit('subresources', 'ok', {
+            'discovered': profile.subresources.discovered_count,
+            'analyzed': profile.subresources.analyzed_count,
+            'total_bytes': profile.subresources.total_bytes_estimate,
+            'third_party_hosts': len(profile.subresources.by_third_party_host),
+        })
+    else:
+        emit('subresources', 'skip', {'error': 'time budget exceeded'})
+
+    # 9. Tech fingerprint (headers + cookies + body + subresource URLs)
+    emit('tech', 'start')
+    subresource_urls = [hit.url for hit in profile.subresources.hits]
     profile.tech_stack = fingerprints.identify_tech(
         profile.https_root.headers,
         profile.https_root.cookies,
         profile.https_root.body_snippet or '',
+        subresource_urls=subresource_urls,
     )
-    emit('fingerprint', 'ok', {'tech_stack': profile.tech_stack})
+    emit('tech', 'ok', {'tech_stack': [t.name for t in profile.tech_stack]})
 
-    # 7. robots.txt (soft-fail)
+    # 10. DNS security records
+    emit('dns_security', 'start')
+    if _budget_remaining(deadline) > 3.5:
+        profile.dns_security = dns_security.analyze(hostname)
+        emit('dns_security', 'ok', {
+            'spf': bool(profile.dns_security.spf),
+            'dmarc': bool(profile.dns_security.dmarc),
+            'caa': len(profile.dns_security.caa),
+        })
+    else:
+        emit('dns_security', 'skip', {'error': 'time budget exceeded'})
+
+    # 11. Bot management vendors (from subresource hosts)
+    emit('bot_mgmt', 'start')
+    profile.bot_management = bot_mgmt.classify(
+        [(hit.host, hit.url) for hit in profile.subresources.hits],
+    )
+    emit('bot_mgmt', 'ok', {
+        'vendors': [b.name for b in profile.bot_management],
+    })
+
+    # 12. robots.txt (soft-fail)
     emit('robots', 'start')
     if _budget_remaining(deadline) > 1.0:
         robots = _http_get(
@@ -309,7 +398,7 @@ def run_probe(target_url: str, emit: Optional[EmitCallback] = None) -> SiteProfi
     else:
         emit('robots', 'skip', {'error': 'time budget exceeded'})
 
-    # 8. Auth surface
+    # 13. Auth surface
     emit('auth_surface', 'start')
     status = profile.https_root.status or 0
     if status in (401, 403):
@@ -319,14 +408,17 @@ def run_probe(target_url: str, emit: Optional[EmitCallback] = None) -> SiteProfi
         profile.auth_surface.append('password field detected on landing page')
     emit('auth_surface', 'ok', {'signals': profile.auth_surface})
 
-    # 9. CDN detection (from resolved IPs)
+    # 14. CDN detection (from resolved IPs)
     emit('cdn', 'start')
     for ip in profile.dns.addresses:
         cdn = fingerprints.is_cdn_ip(ip)
         if cdn:
             profile.cdn = cdn
-            if cdn not in profile.tech_stack:
-                profile.tech_stack.append(cdn)
+            if not any(t.name == cdn for t in profile.tech_stack):
+                from app.profiler.schemas import TechDetection
+                profile.tech_stack.append(
+                    TechDetection(name=cdn, category='CDN', source='ip'),
+                )
             break
     emit('cdn', 'ok', {'cdn': profile.cdn})
 

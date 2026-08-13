@@ -154,7 +154,7 @@ def recommend(profile: SiteProfile) -> dict:
             ),
         })
 
-    if 'WordPress' in profile.tech_stack:
+    if 'WordPress' in profile.tech_names:
         advisories.append({
             'severity': 'info',
             'title': 'WordPress detected',
@@ -165,7 +165,7 @@ def recommend(profile: SiteProfile) -> dict:
             'action': {'label': 'Browse templates', 'url': '/templates/'},
         })
 
-    if 'Drupal' in profile.tech_stack:
+    if 'Drupal' in profile.tech_names:
         advisories.append({
             'severity': 'info',
             'title': 'Drupal detected',
