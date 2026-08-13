@@ -162,11 +162,14 @@ def run_site_profile(app, profile_id: int, session_id: str, target_url: str) -> 
     from app.socketio_events import clear_join_signal, pending_join
 
     with app.app_context():
-        # Wait up to 3s for the browser to join the room before we start
-        # emitting. Falls through anyway so a browser that never connects
-        # doesn't hang the greenlet.
+        # Wait up to 10s for the browser to join the room before we start
+        # emitting. The route pre-creates the Event before spawning us, so
+        # handle_join will fire it whichever ordering the scheduler picks.
+        # 10s is generous cover for slow SocketIO polling handshakes;
+        # falls through anyway so a browser that never connects doesn't
+        # hang the greenlet.
         try:
-            pending_join(session_id).wait(timeout=3.0)
+            pending_join(session_id).wait(timeout=10.0)
         except Exception:  # pragma: no cover — defensive
             pass
 

@@ -144,6 +144,33 @@
     socket.on('connect_error', function() {
         document.getElementById('statusMessage').textContent = {{ _("Connection lost.")|tojson }};
     });
+
+    // Belt-and-suspenders: poll the status endpoint every 2s. If a probe
+    // finishes and its SocketIO events were dropped (race with the room
+    // join, transient delivery failure), the poll catches it and redirects.
+    var statusUrl = {{ url_for('profiler.profile_status', profile_id=profile.id)|tojson }};
+    var pollHandle = setInterval(function() {
+        fetch(statusUrl, {credentials: 'same-origin'})
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(data) {
+                if (!data) return;
+                if (data.status === 'complete') {
+                    clearInterval(pollHandle);
+                    socket.disconnect();
+                    window.location.href = data.redirect_url;
+                } else if (data.status === 'error') {
+                    clearInterval(pollHandle);
+                    socket.disconnect();
+                    var bar = document.getElementById('progressBar');
+                    bar.classList.remove('progress-bar-animated');
+                    bar.classList.add('bg-danger');
+                    document.getElementById('statusMessage').textContent = {{ _("Failed")|tojson }};
+                    document.getElementById('failArea').classList.remove('d-none');
+                    document.getElementById('failReason').textContent = data.error_message || {{ _("Probe failed.")|tojson }};
+                }
+            })
+            .catch(function() { /* swallow transient errors */ });
+    }, 2000);
 })();
 </script>
 {% endblock %}

@@ -20,6 +20,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -32,6 +33,7 @@ from app import db, limiter, socketio
 from app.background_tasks import run_site_profile
 from app.forms import ApplicationCreateForm, ProfileUrlForm
 from app.models import SiteProfile, WaasAccount
+from app.socketio_events import pending_join
 
 bp = Blueprint('profiler', __name__, url_prefix='/profiler')
 
@@ -118,6 +120,13 @@ def new_profile():
         db.session.add(profile)
         db.session.commit()
 
+        # Pre-create the join-signal Event synchronously, BEFORE spawning the
+        # greenlet. Otherwise there's a race: the browser's `join` can arrive
+        # (and be silently dropped by handle_join) before the greenlet has run
+        # `pending_join()` to register the Event. Creating it here guarantees
+        # handle_join finds it whichever side wins the race.
+        pending_join(session_id)
+
         # Capture the app object here, in request context, before spawning the
         # greenlet — same pattern as the clone flow (routes/applications.py:824).
         real_app = current_app._get_current_object()
@@ -149,6 +158,20 @@ def watch_profile(profile_id: int):
         steps=PROBE_STEPS,
         session_id=profile.session_id,
     )
+
+
+@bp.route('/<int:profile_id>/status')
+@login_required
+def profile_status(profile_id: int):
+    """Cheap JSON status endpoint the watch page polls as a fallback for
+    dropped SocketIO events."""
+    profile = SiteProfile.query.filter_by(id=profile_id, user_id=current_user.id).first_or_404()
+    payload = {'status': profile.status, 'target_url': profile.target_url}
+    if profile.status == SiteProfile.STATUS_COMPLETE:
+        payload['redirect_url'] = url_for('profiler.profile_results', profile_id=profile.id)
+    elif profile.status == SiteProfile.STATUS_ERROR:
+        payload['error_message'] = profile.error_message
+    return jsonify(payload)
 
 
 @bp.route('/<int:profile_id>/results')

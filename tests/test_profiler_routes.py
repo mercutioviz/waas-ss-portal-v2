@@ -211,6 +211,59 @@ class TestWatchProfile:
         assert resp.status_code == 404
 
 
+class TestStatusEndpoint:
+    def test_returns_status_and_redirect_when_complete(self, logged_in_client, account, db):
+        row = SiteProfile(
+            user_id=account.user_id, account_id=account.id,
+            target_url='https://example.com/', status=SiteProfile.STATUS_COMPLETE,
+            session_id='room-s1',
+        )
+        db.session.add(row); db.session.commit()
+
+        resp = logged_in_client.get(f'/profiler/{row.id}/status')
+        assert resp.status_code == 200
+        assert resp.get_json()['status'] == 'complete'
+        assert f'/profiler/{row.id}/results' in resp.get_json()['redirect_url']
+
+    def test_reports_error_status(self, logged_in_client, account, db):
+        row = SiteProfile(
+            user_id=account.user_id, account_id=account.id,
+            target_url='https://example.com/', status=SiteProfile.STATUS_ERROR,
+            session_id='room-s2', error_message='cert expired',
+        )
+        db.session.add(row); db.session.commit()
+
+        resp = logged_in_client.get(f'/profiler/{row.id}/status')
+        payload = resp.get_json()
+        assert payload['status'] == 'error'
+        assert payload['error_message'] == 'cert expired'
+
+    def test_probing_status_has_no_redirect(self, logged_in_client, account, db):
+        row = SiteProfile(
+            user_id=account.user_id, account_id=account.id,
+            target_url='https://example.com/', status=SiteProfile.STATUS_PROBING,
+            session_id='room-s3',
+        )
+        db.session.add(row); db.session.commit()
+
+        payload = logged_in_client.get(f'/profiler/{row.id}/status').get_json()
+        assert payload['status'] == 'probing'
+        assert 'redirect_url' not in payload
+
+    def test_foreign_profile_is_404(self, logged_in_client, account, db):
+        other = User(username='other', email='o@o', role='user', is_active=True)
+        other.set_password('x'); db.session.add(other); db.session.commit()
+        row = SiteProfile(
+            user_id=other.id, account_id=account.id,
+            target_url='https://example.com/', status=SiteProfile.STATUS_COMPLETE,
+            session_id='room-s4',
+        )
+        db.session.add(row); db.session.commit()
+
+        resp = logged_in_client.get(f'/profiler/{row.id}/status')
+        assert resp.status_code == 404
+
+
 class TestResults:
     def test_renders_prefilled_form(self, logged_in_client, account, db):
         recommendation = {
