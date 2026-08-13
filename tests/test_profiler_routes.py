@@ -67,22 +67,52 @@ def spawn_stub(monkeypatch):
 
 
 class TestGetNewProfile:
-    def test_requires_account_id(self, logged_in_client, account):
+    def test_auto_selects_when_user_has_one_v2_account(self, logged_in_client, account):
+        # `account` fixture is the only v2-capable account for this user →
+        # /profiler/new (no arg) should skip the picker and go straight in.
         resp = logged_in_client.get('/profiler/new', follow_redirects=False)
         assert resp.status_code == 302
-        assert '/accounts' in resp.headers['Location']
+        assert f'/profiler/new?account_id={account.id}' in resp.headers['Location']
+
+    def test_shows_picker_when_multiple_v2_accounts(self, logged_in_client, account, db, user):
+        # Add a second v2-capable account so the picker is the right response.
+        second = WaasAccount(user_id=user.id, account_name='Beta WaaS', is_active=True)
+        second.waas_email = 'ops@beta.example.com'
+        second.waas_password = 'secret'
+        db.session.add(second); db.session.commit()
+
+        resp = logged_in_client.get('/profiler/new')
+        assert resp.status_code == 200
+        assert b'Acme WaaS' in resp.data
+        assert b'Beta WaaS' in resp.data
+        assert b'Which WaaS account' in resp.data
+
+    def test_shows_no_accounts_template_when_no_v2_creds_anywhere(
+        self, logged_in_client, account_no_v2,
+    ):
+        # Only a v4-key-only account exists — profiler cannot use it, so the
+        # empty-state template should render with a link to manage accounts.
+        resp = logged_in_client.get('/profiler/new')
+        assert resp.status_code == 200
+        assert b'No accounts with v2 credentials' in resp.data
+        assert b'Manage accounts' in resp.data
 
     def test_404_on_foreign_account(self, logged_in_client, account):
         resp = logged_in_client.get(f'/profiler/new?account_id={account.id + 9999}')
         assert resp.status_code == 404
 
-    def test_redirects_when_account_has_no_v2_creds(self, logged_in_client, account_no_v2):
+    def test_redirects_when_selected_account_has_no_v2_creds(
+        self, logged_in_client, account_no_v2,
+    ):
+        # Passing an account_id that's real but not v2-capable → bounce back
+        # to /profiler/new (which renders the picker or empty state).
         resp = logged_in_client.get(
             f'/profiler/new?account_id={account_no_v2.id}',
             follow_redirects=False,
         )
         assert resp.status_code == 302
-        assert '/accounts' in resp.headers['Location']
+        assert '/profiler/new' in resp.headers['Location']
+        assert 'account_id' not in resp.headers['Location']
 
     def test_renders_form_with_valid_account(self, logged_in_client, account):
         resp = logged_in_client.get(f'/profiler/new?account_id={account.id}')

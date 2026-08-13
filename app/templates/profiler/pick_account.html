@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Profile a site') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('New site'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-9 col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="mb-0"><i class="bi bi-compass"></i> {{ _('Profile a site') }}</h2>
+        </div>
+
+        {% if accounts %}
+            <p class="text-muted">
+                {{ _('Which WaaS account should host the new application?') }}
+            </p>
+            <div class="list-group">
+                {% for acc in accounts %}
+                <a href="{{ url_for('profiler.new_profile', account_id=acc.id) }}"
+                   class="list-group-item list-group-item-action">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-semibold">
+                                <i class="bi bi-key"></i> {{ acc.account_name }}
+                            </div>
+                            {% if acc.waas_account_id %}
+                            <div class="small text-muted">{{ _('Account ID:') }} <code>{{ acc.waas_account_id }}</code></div>
+                            {% endif %}
+                        </div>
+                        <i class="bi bi-arrow-right"></i>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-exclamation-triangle text-warning"></i>
+                        {{ _('No accounts with v2 credentials yet') }}
+                    </h5>
+                    <p class="card-text">
+                        {{ _('The Web App Profiler ends by creating a new application, which uses '
+                             'the WaaS v2 API. That means whichever account you use must have an '
+                             'email + password set — not just a v4 API key.') }}
+                    </p>
+                    <p class="card-text small text-muted">
+                        {{ _('Add v2 credentials to an existing account, or create a new one, then '
+                             'come back here.') }}
+                    </p>
+                    <a href="{{ url_for('accounts.list_accounts') }}" class="btn btn-primary">
+                        <i class="bi bi-key"></i> {{ _('Manage accounts') }}
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

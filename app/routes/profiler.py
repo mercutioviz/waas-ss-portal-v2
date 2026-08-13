@@ -47,26 +47,43 @@ def _get_account_for_user(account_id: int) -> WaasAccount | None:
     return WaasAccount.query.filter_by(id=account_id, user_id=current_user.id).first()
 
 
+def _v2_capable_accounts_for_user() -> list[WaasAccount]:
+    """All active accounts the current user owns that can be used to create
+    an application at the end of the wizard (v2 email+password required)."""
+    owned = WaasAccount.query.filter_by(user_id=current_user.id, is_active=True).all()
+    return [a for a in owned if a.has_v2_credentials]
+
+
 @bp.route('/new', methods=['GET', 'POST'])
 @login_required
 @limiter.limit('5 per minute', methods=['POST'])
 def new_profile():
     account_id = request.values.get('account_id', type=int)
+
+    # No account chosen yet — pick one, auto-forward if only one option, or
+    # explain how to enable the feature if none.
     if not account_id:
-        flash(_('Choose a WaaS account first — the profiler creates apps under it.'), 'info')
-        return redirect(url_for('accounts.list_accounts'))
+        v2_accounts = _v2_capable_accounts_for_user()
+        if not v2_accounts:
+            return render_template('profiler/pick_account.html', accounts=[])
+        if len(v2_accounts) == 1:
+            return redirect(url_for('profiler.new_profile', account_id=v2_accounts[0].id))
+        return render_template('profiler/pick_account.html', accounts=v2_accounts)
 
     account = _get_account_for_user(account_id)
     if not account:
         abort(404)
 
     if not account.has_v2_credentials:
+        # Instead of bouncing to a page with no context, render the picker
+        # so the user can see their other options (if any) inline.
         flash(
-            _('The Web App Profiler creates an application at the end of the wizard, '
-              'which needs v2 API credentials (email + password) on this account.'),
+            _('Account "%(name)s" needs v2 credentials (email + password) '
+              'before the profiler can create an application under it.',
+              name=account.account_name),
             'warning',
         )
-        return redirect(url_for('accounts.list_accounts'))
+        return redirect(url_for('profiler.new_profile'))
 
     form = ProfileUrlForm()
 
