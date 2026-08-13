@@ -82,7 +82,13 @@ def create_app(config_name='default'):
     babel.init_app(app, locale_selector=get_locale)
     limiter.init_app(app)
     mail.init_app(app)
-    socketio.init_app(app, async_mode='gevent', cors_allowed_origins='*')
+    # Enable Flask-SocketIO / Engine.IO packet-level logging while the
+    # profiler live-progress delivery is being debugged. Very chatty —
+    # remove `logger=True`/`engineio_logger=True` once resolved.
+    socketio.init_app(
+        app, async_mode='gevent', cors_allowed_origins='*',
+        logger=True, engineio_logger=True,
+    )
 
     # Configure Flask-Login
     from flask_babel import lazy_gettext as _l

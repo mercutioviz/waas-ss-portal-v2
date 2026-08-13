@@ -34,26 +34,27 @@ def clear_join_signal(room: str) -> None:
 @socketio.on('connect')
 def handle_connect():
     """Authenticate WebSocket connections."""
-    if not current_user.is_authenticated:
+    authed = current_user.is_authenticated
+    logger.info(f'socketio: connect fired, authenticated={authed}, user={getattr(current_user, "username", "?")}')
+    if not authed:
         return False  # Reject unauthenticated connections
-    logger.debug(f'WebSocket connected: user={current_user.username}')
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection."""
-    if current_user.is_authenticated:
-        logger.debug(f'WebSocket disconnected: user={current_user.username}')
+    logger.info(f'socketio: disconnect fired, user={getattr(current_user, "username", "?")}')
 
 
 @socketio.on('join')
 def handle_join(data):
     """Join a room for scoped updates (e.g., bulk operation session)."""
-    room = data.get('room')
+    # Log FIRST, before any guard — we need to see the handler firing at all,
+    # even when the auth or room check bails out.
+    logger.info(f'socketio: join fired, data={data!r}, authed={current_user.is_authenticated}')
+    room = data.get('room') if isinstance(data, dict) else None
     if room and current_user.is_authenticated:
         join_room(room)
-        # Bumped from debug to info so we can verify from production logs
-        # that the browser actually joined the room a greenlet is emitting to.
         logger.info(f'socketio: user={current_user.username} joined room={room}')
         emit('joined', {'room': room})
         # If a background greenlet is waiting for this room to be joined
