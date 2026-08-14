@@ -185,7 +185,6 @@ def run_site_profile(app, profile_id: int, session_id: str, target_url: str) -> 
         step_labels = {s.key: s.label for s in PROBE_STEPS}
         total = len(PROBE_STEPS)
 
-        logger.info(f'profiler: emitting to room={session_id} (probe of {target_url})')
         socketio.emit('profile_progress', {
             'phase': 'started',
             'total': total,

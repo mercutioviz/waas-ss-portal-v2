@@ -68,30 +68,14 @@
     STEP_KEYS.forEach(function(k, i) { stepIndexFor[k] = i + 1; });
 
     function joinRoom() {
-        console.log('[profiler] emitting join for room', sessionId);
         socket.emit('join', {room: sessionId});
         document.getElementById('statusMessage').textContent = {{ _("Starting probe...")|tojson }};
     }
 
     // Rejoin on both first connect AND any subsequent reconnect — the
     // socket.io v4 client fires 'connect' for both, but be explicit.
-    socket.on('connect', function() {
-        console.log('[profiler] socket.on(connect) fired, id=', socket.id, 'transport=', socket.io.engine.transport.name);
-        joinRoom();
-    });
-    socket.io.on('reconnect', function() {
-        console.log('[profiler] manager reconnect');
-        joinRoom();
-    });
-    socket.on('joined', function(d) {
-        console.log('[profiler] server confirmed join:', d);
-    });
-    socket.on('disconnect', function(reason) {
-        console.log('[profiler] socket disconnected:', reason);
-    });
-    socket.on('connect_error', function(err) {
-        console.log('[profiler] connect_error:', err && err.message);
-    });
+    socket.on('connect', joinRoom);
+    socket.io.on('reconnect', joinRoom);
 
     function setStepActive(stepNum) {
         var spinnerEl = document.getElementById('step-spinner-' + stepNum);
