@@ -1,8 +1,9 @@
 from collections import Counter, defaultdict
 from datetime import datetime, date, timedelta
-from flask import Blueprint, render_template, redirect, url_for, jsonify, request
+from flask import Blueprint, render_template, redirect, url_for, jsonify, request, send_from_directory, current_app
 from flask_login import login_required, current_user
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,18 @@ def index():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
     return redirect(url_for('auth.login'))
+
+
+@bp.route('/favicon.ico')
+def favicon():
+    """Serve /favicon.ico for browsers that auto-fetch it from the site
+    root. Base.html also declares the SVG icon explicitly; this route
+    handles the automatic-request case so it stops 404-ing in the log."""
+    return send_from_directory(
+        os.path.join(current_app.root_path, 'static'),
+        'favicon.ico',
+        mimetype='image/x-icon',
+    )
 
 
 @bp.route('/dashboard')
