@@ -86,14 +86,18 @@
 
 
 {# Dismissible module info card. Shown above the main content on list pages.
-   `key` must be unique per module — used as localStorage flag so the user can dismiss it permanently. #}
-{% macro module_info(key, icon, title, body, help_topic=None) %}
+   `key` must be unique per module — used as localStorage flag so the user can dismiss it permanently.
+   `cross_link` is an optional {url, label} dict rendered as a link right after `body`. #}
+{% macro module_info(key, icon, title, body, help_topic=None, cross_link=None) %}
 <div class="alert alert-info border-0 d-flex align-items-start gap-3 module-info-card"
      data-info-key="{{ key }}" role="region" aria-label="{{ title }}">
   <i class="bi bi-{{ icon }} fs-3 mt-1 flex-shrink-0"></i>
   <div class="flex-grow-1">
     <h6 class="alert-heading mb-1">{{ title }}</h6>
-    <p class="mb-0 small">{{ body | safe }}
+    <p class="mb-0 small">{{ body }}
+      {% if cross_link %}
+      <a href="{{ cross_link.url }}">{{ cross_link.label }}</a>
+      {% endif %}
       {% if help_topic %}
       <a href="{{ url_for(help_topic) }}" class="alert-link">{{ _('Learn more') }} <i class="bi bi-arrow-right-short"></i></a>
       {% endif %}

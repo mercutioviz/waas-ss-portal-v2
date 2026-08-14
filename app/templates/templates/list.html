@@ -16,8 +16,9 @@
     key='templates',
     icon='file-earmark-code',
     title=_('Config Templates'),
-    body=_('Templates are curated, opinionated security baselines built into the portal. Apply them as-is for consistent protection.') ~ ' <a href="' ~ url_for('features.list_features') ~ '">' ~ _('For direct API payload control, see Raw Configs →') ~ '</a>',
-    help_topic='help.templates'
+    body=_('Templates are curated, opinionated security baselines built into the portal. Apply them as-is for consistent protection.'),
+    help_topic='help.templates',
+    cross_link={'url': url_for('features.list_features'), 'label': _('For direct API payload control, see Raw Configs →')}
 ) }}
 <div class="d-flex justify-content-between align-items-center mt-4 mb-4">
     <h2><i class="bi bi-file-earmark-code"></i> {{ _('Config Templates') }}</h2>

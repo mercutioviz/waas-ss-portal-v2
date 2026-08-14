@@ -26,8 +26,9 @@
     'raw_configs',
     'info-circle',
     _('What are Raw Configs?'),
-    _('Raw Configs hold the verbatim JSON body of a v4 WaaS API call (e.g. /import/, /basic_security/). Use them when you need full control over the payload.') ~ ' <a href="' ~ url_for('templates.list_templates') ~ '">' ~ _('For named, reusable presets, see Templates →') ~ '</a>',
-    help_topic='help.raw_configs'
+    _('Raw Configs hold the verbatim JSON body of a v4 WaaS API call (e.g. /import/, /basic_security/). Use them when you need full control over the payload.'),
+    help_topic='help.raw_configs',
+    cross_link={'url': url_for('templates.list_templates'), 'label': _('For named, reusable presets, see Templates →')}
 ) }}
 
 <!-- Search -->
