@@ -28,8 +28,11 @@ with app.app_context():
         db.session.commit()
         app.logger.info('Created default admin user (admin/admin)')
 
-    # Seed predefined features
-    from run import seed_features
+    # Seed predefined features — import from app.seed, NOT run.py.
+    # Importing run triggers its module-level `app = create_app()`, which
+    # double-initializes Flask-SocketIO and silently unregisters the event
+    # handlers registered by app/socketio_events.py.
+    from app.seed import seed_features
     created = seed_features()
     if created:
         app.logger.info(f'Seeded {created} predefined features.')
