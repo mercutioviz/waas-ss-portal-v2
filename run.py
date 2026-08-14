@@ -49,6 +49,14 @@ def run_reports():
     print('Scheduled reports processed.')
 
 
+@app.cli.command('cleanup-site-profiles')
+def cleanup_site_profiles():
+    """Delete profiler results older than the retention window immediately."""
+    from app.background_tasks import run_site_profile_cleanup
+    deleted = run_site_profile_cleanup(app)
+    print(f'Deleted {deleted} site profile(s) older than the retention window.')
+
+
 @app.cli.command('seed')
 def seed():
     """Initialize DB and create admin user (convenience command)."""

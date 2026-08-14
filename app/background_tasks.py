@@ -2,12 +2,14 @@
 
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app import db, socketio
 from app.waas_client import WaasApiError
 
 logger = logging.getLogger(__name__)
+
+SITE_PROFILE_RETENTION_DAYS = 30
 
 
 def run_bulk_operation(session_id, items, operation_func, name='Bulk operation'):
@@ -249,3 +251,21 @@ def run_site_profile(app, profile_id: int, session_id: str, target_url: str) -> 
 
         finally:
             clear_join_signal(session_id)
+
+
+def run_site_profile_cleanup(app) -> int:
+    """Delete SiteProfile rows older than SITE_PROFILE_RETENTION_DAYS.
+
+    Runs on a daily APScheduler cron job (see app/__init__.py) and is also
+    exposed as `flask cleanup-site-profiles` for manual invocation.
+    """
+    from app.models import SiteProfile
+
+    with app.app_context():
+        cutoff = datetime.utcnow() - timedelta(days=SITE_PROFILE_RETENTION_DAYS)
+        deleted = SiteProfile.query.filter(SiteProfile.created_at < cutoff) \
+            .delete(synchronize_session=False)
+        db.session.commit()
+        logger.info(f'Site profile cleanup: deleted {deleted} row(s) older than '
+                    f'{SITE_PROFILE_RETENTION_DAYS} days.')
+        return deleted

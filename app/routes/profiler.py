@@ -32,12 +32,21 @@ from flask_login import current_user, login_required
 from app import db, limiter, socketio
 from app.background_tasks import run_site_profile
 from app.forms import ApplicationCreateForm, ProfileUrlForm
-from app.models import SiteProfile, WaasAccount
+from app.models import AuditLog, SiteProfile, WaasAccount, get_user_accounts
 from app.socketio_events import pending_join
 
 bp = Blueprint('profiler', __name__, url_prefix='/profiler')
 
 COOLDOWN_SECONDS = 30
+
+PROFILE_STATUS_BADGES = {
+    SiteProfile.STATUS_PENDING: 'bg-secondary',
+    SiteProfile.STATUS_PROBING: 'bg-info',
+    SiteProfile.STATUS_COMPLETE: 'bg-success',
+    SiteProfile.STATUS_ERROR: 'bg-danger',
+}
+
+PROFILES_PER_PAGE = 20
 
 
 def _get_account_for_user(account_id: int) -> WaasAccount | None:
@@ -54,6 +63,61 @@ def _v2_capable_accounts_for_user() -> list[WaasAccount]:
     an application at the end of the wizard (v2 email+password required)."""
     owned = WaasAccount.query.filter_by(user_id=current_user.id, is_active=True).all()
     return [a for a in owned if a.has_v2_credentials]
+
+
+@bp.route('/')
+@login_required
+def list_profiles():
+    account_id = request.args.get('account_id', type=int)
+    accounts = get_user_accounts(current_user)
+
+    query = SiteProfile.query.filter_by(user_id=current_user.id)
+    selected_account = None
+    if account_id:
+        selected_account = next((a for a in accounts if a.id == account_id), None)
+        if selected_account is None:
+            abort(404)
+        query = query.filter_by(account_id=account_id)
+
+    page = request.args.get('page', 1, type=int)
+    profiles = query.order_by(SiteProfile.created_at.desc()) \
+        .paginate(page=page, per_page=PROFILES_PER_PAGE, error_out=False)
+
+    return render_template(
+        'profiler/list.html',
+        profiles=profiles,
+        accounts=accounts,
+        selected_account=selected_account,
+        status_badges=PROFILE_STATUS_BADGES,
+    )
+
+
+@bp.route('/<int:profile_id>/delete', methods=['POST'])
+@login_required
+def delete_profile(profile_id: int):
+    profile = SiteProfile.query.filter_by(id=profile_id, user_id=current_user.id).first_or_404()
+
+    if profile.status in (SiteProfile.STATUS_PENDING, SiteProfile.STATUS_PROBING):
+        flash(_('Cannot delete a profile run that is still in progress.'), 'warning')
+        return redirect(url_for('profiler.list_profiles', account_id=request.args.get('account_id', type=int)))
+
+    target_url = profile.target_url
+    account_name = profile.account.account_name if profile.account else 'unknown'
+
+    AuditLog.log(
+        user_id=current_user.id,
+        action='profile_delete',
+        resource_type='site_profile',
+        resource_id=profile.id,
+        details=f'Deleted profiler result for {target_url} on account {account_name}',
+        ip_address=request.remote_addr,
+    )
+
+    db.session.delete(profile)
+    db.session.commit()
+
+    flash(_('Profiler result for "%(url)s" deleted.', url=target_url), 'success')
+    return redirect(url_for('profiler.list_profiles', account_id=request.args.get('account_id', type=int)))
 
 
 @bp.route('/new', methods=['GET', 'POST'])
@@ -88,6 +152,9 @@ def new_profile():
         return redirect(url_for('profiler.new_profile'))
 
     form = ProfileUrlForm()
+    if request.method == 'GET' and request.args.get('target_url'):
+        # Re-run shortcut from the history list — pre-fill, don't auto-submit.
+        form.target_url.data = request.args.get('target_url')
 
     if form.validate_on_submit():
         target = form.target_url.data.strip()

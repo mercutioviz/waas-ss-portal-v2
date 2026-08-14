@@ -264,6 +264,7 @@ def create_app(config_name='default'):
     # Start scheduler (avoid double-start in debug reloader; skip under pytest)
     if (not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true') \
             and not app.config.get('TESTING'):
+        from app.background_tasks import run_site_profile_cleanup
         from app.report_service import run_scheduled_reports
 
         scheduler.init_app(app)
@@ -271,6 +272,10 @@ def create_app(config_name='default'):
         @scheduler.task('interval', id='run_scheduled_reports', minutes=15, misfire_grace_time=300)
         def _run_reports_job():
             run_scheduled_reports(app)
+
+        @scheduler.task('cron', id='cleanup_site_profiles', hour=3, minute=17, misfire_grace_time=3600)
+        def _cleanup_site_profiles_job():
+            run_site_profile_cleanup(app)
 
         scheduler.start()
 
