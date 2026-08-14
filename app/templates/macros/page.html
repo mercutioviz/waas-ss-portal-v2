@@ -93,7 +93,7 @@
   <i class="bi bi-{{ icon }} fs-3 mt-1 flex-shrink-0"></i>
   <div class="flex-grow-1">
     <h6 class="alert-heading mb-1">{{ title }}</h6>
-    <p class="mb-0 small">{{ body }}
+    <p class="mb-0 small">{{ body | safe }}
       {% if help_topic %}
       <a href="{{ url_for(help_topic) }}" class="alert-link">{{ _('Learn more') }} <i class="bi bi-arrow-right-short"></i></a>
       {% endif %}
