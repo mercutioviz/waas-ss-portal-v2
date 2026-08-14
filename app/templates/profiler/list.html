@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import module_info, breadcrumbs, empty_state %}
+{% block title %}{{ _('Profiler History') }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Profiler History'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+{{ module_info(
+    key='profiler_history',
+    icon='clock-history',
+    title=_('Profiler History'),
+    body=_('Past web app profiler runs across your accounts. Review a completed probe, re-run it against the same URL, or clean up old results.'),
+) }}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-clock-history"></i> {{ _('Profiler History') }}</h2>
+    <a href="{{ url_for('profiler.new_profile') }}" class="btn btn-primary"><i class="bi bi-compass"></i> {{ _('New site') }}</a>
+</div>
+
+{% if accounts|length > 1 %}
+<div class="d-inline-flex align-items-center mb-3">
+    <span class="text-muted me-1">{{ _('Account:') }}</span>
+    <div class="dropdown d-inline">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+            <strong>{{ selected_account.account_name if selected_account else _('All accounts') }}</strong>
+        </button>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item {% if not selected_account %}active{% endif %}" href="{{ url_for('profiler.list_profiles') }}">{{ _('All accounts') }}</a></li>
+            {% for acct in accounts %}
+            <li><a class="dropdown-item {% if selected_account and acct.id == selected_account.id %}active{% endif %}" href="{{ url_for('profiler.list_profiles', account_id=acct.id) }}">{{ acct.account_name }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+{% if profiles.items %}
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" aria-label="{{ _('Profiler history') }}">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Target URL') }}</th>
+                        <th>{{ _('Account') }}</th>
+                        <th>{{ _('Status') }}</th>
+                        <th>{{ _('Created') }}</th>
+                        <th>{{ _('Completed') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for profile in profiles.items %}
+                    <tr>
+                        <td><strong>{{ profile.target_url }}</strong></td>
+                        <td>{{ profile.account.account_name if profile.account else '—' }}</td>
+                        <td>
+                            <span class="badge {{ status_badges.get(profile.status, 'bg-secondary') }}">{{ profile.status|capitalize }}</span>
+                            {% if profile.status == 'error' and profile.error_message %}
+                            <span class="ms-1 text-danger" style="cursor:help" data-bs-toggle="tooltip" title="{{ profile.error_message }}">
+                                <i class="bi bi-exclamation-triangle-fill"></i>
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td><small>{{ profile.created_at|datetime_format if profile.created_at else '—' }}</small></td>
+                        <td><small>{{ profile.completed_at|datetime_format if profile.completed_at else '—' }}</small></td>
+                        <td>
+                            <div class="d-flex gap-1 flex-wrap">
+                                {% if profile.status == 'complete' %}
+                                <a href="{{ url_for('profiler.profile_results', profile_id=profile.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> {{ _('View') }}</a>
+                                {% elif profile.status in ('pending', 'probing') %}
+                                <a href="{{ url_for('profiler.watch_profile', profile_id=profile.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> {{ _('Watch') }}</a>
+                                {% endif %}
+                                <a href="{{ url_for('profiler.new_profile', account_id=profile.account_id, target_url=profile.target_url) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-repeat"></i> {{ _('Re-run') }}</a>
+                                {% if profile.status in ('pending', 'probing') %}
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled title="{{ _('Cannot delete while the run is in progress.') }}"><i class="bi bi-trash"></i> {{ _('Delete') }}</button>
+                                {% else %}
+                                <form method="POST" action="{{ url_for('profiler.delete_profile', profile_id=profile.id, account_id=selected_account.id if selected_account else none) }}" class="d-inline" data-confirm-message="{{ _('Delete this profiler result?') }} {{ _('This cannot be undone.') }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> {{ _('Delete') }}</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% if profiles.pages > 1 %}
+    <div class="card-footer">
+        <nav aria-label="{{ _('Profiler history pages') }}">
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                {% if profiles.has_prev %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('profiler.list_profiles', page=profiles.prev_num, account_id=selected_account.id if selected_account else none) }}">{{ _('Previous') }}</a></li>
+                {% endif %}
+                {% for page_num in profiles.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if page_num %}
+                    <li class="page-item {{ 'active' if page_num == profiles.page }}"><a class="page-link" href="{{ url_for('profiler.list_profiles', page=page_num, account_id=selected_account.id if selected_account else none) }}">{{ page_num }}</a></li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                {% if profiles.has_next %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('profiler.list_profiles', page=profiles.next_num, account_id=selected_account.id if selected_account else none) }}">{{ _('Next') }}</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% else %}
+{{ empty_state('clock-history', _('No Profiler Runs Yet'), _('Profile a site to get a suggested starter WaaS config with plain-English rationale.'), cta={'label': _('Profile a site'), 'url': url_for('profiler.new_profile'), 'icon': 'compass'}) }}
+{% endif %}
+{% endblock %}
