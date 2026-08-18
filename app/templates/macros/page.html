@@ -108,6 +108,29 @@
 {% endmacro %}
 
 
+{# Reusable JSON before/after diff modal. `modal_id` must be unique per page.
+   Populate it by calling `document.getElementById('<modal_id>-content').innerHTML = window.renderJsonDiff(before, after)`
+   before showing it via `new bootstrap.Modal(document.getElementById('<modal_id>')).show()`. #}
+{% macro diff_modal(modal_id, title=None) %}
+<div class="modal fade" id="{{ modal_id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-file-diff"></i> {{ title or _('Configuration Changes') }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="{{ modal_id }}-content" class="diff-preview font-monospace"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+
 {# Account context chip with switch dropdown.
    `selected` is the current WaasAccount object.
    `all_accounts` is the full list available to the user.

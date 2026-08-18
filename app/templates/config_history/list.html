@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import module_info, breadcrumbs, empty_state %}
+{% block title %}{{ _('Config History') }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Config History'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+{{ module_info(
+    key='config_history',
+    icon='clock-history',
+    title=_('Config History'),
+    body=_('Every template apply, raw config apply, bulk operation, and inline edit is snapshotted here so you can review what changed and revert it.'),
+) }}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-clock-history"></i> {{ _('Config History') }}</h2>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small mb-0">{{ _('Account') }}</label>
+                <select name="account_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">{{ _('All accounts') }}</option>
+                    {% for acct in accounts %}
+                    <option value="{{ acct.id }}" {% if selected_account and acct.id == selected_account.id %}selected{% endif %}>{{ acct.account_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">{{ _('Resource Type') }}</label>
+                <select name="resource_type" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">{{ _('All types') }}</option>
+                    {% for rtype, label in resource_type_labels.items() %}
+                    <option value="{{ rtype }}" {% if resource_type == rtype %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">{{ _('App ID') }}</label>
+                <input type="text" name="app_id" value="{{ app_id or '' }}" class="form-control form-control-sm" placeholder="{{ _('Filter by app') }}">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">{{ _('Filter') }}</button>
+                {% if selected_account or resource_type or app_id %}
+                <a href="{{ url_for('config_history.list_snapshots') }}" class="btn btn-sm btn-outline-secondary">{{ _('Clear') }}</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if snapshots.items %}
+{% set seen_batches = [] %}
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" aria-label="{{ _('Config history') }}">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('App') }}</th>
+                        <th>{{ _('Account') }}</th>
+                        <th>{{ _('Type') }}</th>
+                        <th>{{ _('Label') }}</th>
+                        <th>{{ _('When') }}</th>
+                        <th>{{ _('Status') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for snap in snapshots.items %}
+                    <tr>
+                        <td><strong>{{ snap.app_id }}</strong></td>
+                        <td>{{ snap.account.account_name if snap.account else '—' }}</td>
+                        <td>
+                            <span class="badge {{ resource_type_badges.get(snap.resource_type, 'bg-secondary') }}">{{ resource_type_labels.get(snap.resource_type, snap.resource_type) }}</span>
+                            {% if snap.batch_id %}
+                            <span class="ms-1 text-muted small" data-bs-toggle="tooltip" title="{{ _('Part of a bulk operation') }}"><i class="bi bi-collection"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>{{ snap.resource_label or snap.section or '—' }}</td>
+                        <td><small>{{ snap.created_at|datetime_format if snap.created_at else '—' }}</small></td>
+                        <td>
+                            {% if snap.is_reverted %}
+                            <span class="badge bg-secondary">{{ _('Reverted') }}</span>
+                            {% else %}
+                            <span class="badge bg-success">{{ _('Active') }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="d-flex gap-1 flex-wrap">
+                                <a href="{{ url_for('config_history.view_snapshot', snapshot_id=snap.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> {{ _('View') }}</a>
+                                {% if snap.batch_id and snap.batch_id not in seen_batches %}
+                                {% set _ = seen_batches.append(snap.batch_id) %}
+                                <form method="POST" action="{{ url_for('config_history.revert_batch', batch_id=snap.batch_id) }}" class="d-inline" data-confirm-message="{{ _('Revert every application in this batch to its prior state?') }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning"><i class="bi bi-arrow-counterclockwise"></i> {{ _('Revert Batch') }}</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% if snapshots.pages > 1 %}
+    <div class="card-footer">
+        <nav aria-label="{{ _('Config history pages') }}">
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                {% if snapshots.has_prev %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('config_history.list_snapshots', page=snapshots.prev_num, account_id=selected_account.id if selected_account else none, resource_type=resource_type, app_id=app_id) }}">{{ _('Previous') }}</a></li>
+                {% endif %}
+                {% for page_num in snapshots.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if page_num %}
+                    <li class="page-item {{ 'active' if page_num == snapshots.page }}"><a class="page-link" href="{{ url_for('config_history.list_snapshots', page=page_num, account_id=selected_account.id if selected_account else none, resource_type=resource_type, app_id=app_id) }}">{{ page_num }}</a></li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                {% if snapshots.has_next %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('config_history.list_snapshots', page=snapshots.next_num, account_id=selected_account.id if selected_account else none, resource_type=resource_type, app_id=app_id) }}">{{ _('Next') }}</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% else %}
+{{ empty_state('clock-history', _('No Config History Yet'), _('Apply a template, apply a raw config, or edit a security setting — a snapshot will appear here so you can review or revert it.')) }}
+{% endif %}
+{% endblock %}

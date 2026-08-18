@@ -1,10 +1,11 @@
+import copy
 import json
 import logging
 import uuid
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
-from app.models import WaasAccount, AuditLog, get_user_accounts, get_account_for_user, can_write
+from app.models import WaasAccount, AuditLog, ConfigSnapshot, get_user_accounts, get_account_for_user, can_write
 from app.waas_client import WaasClient, WaasApiError
 from app.forms import ApplicationCreateForm, CloneApplicationForm
 from app import limiter, socketio
@@ -404,9 +405,21 @@ def update_security_config(account_id, app_id):
         flash(_('You do not have permission to modify configurations.'), 'danger')
         return redirect(url_for('applications.security_config', account_id=account_id, app_id=app_id))
 
+    section_getters = {
+        'basic_security': client.get_basic_security,
+        'request_limits': client.get_request_limits,
+        'clickjacking_protection': client.get_clickjacking_protection,
+        'data_theft_protection': client.get_data_theft_protection,
+    }
+
     try:
         data = request.get_json() if request.is_json else request.form.to_dict()
         section = data.pop('section', 'basic_security')
+
+        try:
+            payload_before = section_getters.get(section, client.get_basic_security)(app_id)
+        except WaasApiError:
+            payload_before = {}
 
         if section == 'request_limits':
             int_data = {}
@@ -418,15 +431,29 @@ def update_security_config(account_id, app_id):
                 except (ValueError, TypeError):
                     int_data[k] = v
             client.update_request_limits(app_id, int_data)
+            payload_applied = int_data
         elif section == 'clickjacking_protection':
             bool_data = {k: (v == 'true' or v is True) for k, v in data.items() if k != 'csrf_token'}
             client.update_clickjacking_protection(app_id, bool_data)
+            payload_applied = bool_data
         elif section == 'data_theft_protection':
             bool_data = {k: (v == 'true' or v is True) for k, v in data.items() if k != 'csrf_token'}
             client.update_data_theft_protection(app_id, bool_data)
+            payload_applied = bool_data
         else:
             data.pop('csrf_token', None)
             client.update_security_config(app_id, data)
+            payload_applied = data
+
+        ConfigSnapshot.record(
+            user_id=current_user.id,
+            account_id=account.id,
+            app_id=app_id,
+            resource_type='security_config_update',
+            payload_before=payload_before,
+            section=section,
+            payload_applied=payload_applied
+        )
 
         section_labels = {
             'basic_security': 'protection mode',
@@ -572,6 +599,7 @@ def update_server(account_id, app_id):
     try:
         application = client.get_application(app_id)
         servers = application.get('servers', [])
+        payload_before = copy.deepcopy(servers)
 
         found = False
         for server in servers:
@@ -593,6 +621,16 @@ def update_server(account_id, app_id):
             return jsonify({'success': False, 'error': f'Server "{server_name}" not found'}), 404
 
         client.import_application(app_id, {'servers': servers}, include_servers=True)
+
+        ConfigSnapshot.record(
+            user_id=current_user.id,
+            account_id=account.id,
+            app_id=app_id,
+            resource_type='server_update',
+            payload_before=payload_before,
+            resource_label=server_name,
+            payload_applied=servers
+        )
 
         AuditLog.log(
             user_id=current_user.id,
@@ -640,6 +678,7 @@ def update_endpoints(account_id, app_id):
     try:
         application = client.get_application(app_id)
         endpoints = application.get('endpoints', {})
+        payload_before = copy.deepcopy(endpoints)
 
         if section == 'tls':
             # Merge user payload into the full exported https config
@@ -660,6 +699,16 @@ def update_endpoints(account_id, app_id):
             return jsonify({'success': False, 'error': f'Unknown section: {section}'}), 400
 
         result = client.update_application_endpoints(app_id, api_payload)
+
+        ConfigSnapshot.record(
+            user_id=current_user.id,
+            account_id=account.id,
+            app_id=app_id,
+            resource_type='endpoint_update',
+            payload_before=payload_before,
+            section=section,
+            payload_applied=api_payload
+        )
 
         AuditLog.log(
             user_id=current_user.id,
@@ -721,6 +770,21 @@ def security_ajax_update(account_id, app_id):
             except ValueError as e:
                 return jsonify({'success': False, 'error': str(e)}), 400
 
+    section_getters = {
+        'basic_security': client.get_basic_security,
+        'request_limits': client.get_request_limits,
+        'clickjacking_protection': client.get_clickjacking_protection,
+        'data_theft_protection': client.get_data_theft_protection,
+    }
+    getter = section_getters.get(section)
+    if not getter:
+        return jsonify({'success': False, 'error': f'Unknown section: {section}'}), 400
+
+    try:
+        payload_before = getter(app_id)
+    except WaasApiError:
+        payload_before = {}
+
     try:
         if section == 'basic_security':
             client.update_security_config(app_id, {field: value})
@@ -738,6 +802,16 @@ def security_ajax_update(account_id, app_id):
             client.update_data_theft_protection(app_id, {field: value})
         else:
             return jsonify({'success': False, 'error': f'Unknown section: {section}'}), 400
+
+        ConfigSnapshot.record(
+            user_id=current_user.id,
+            account_id=account.id,
+            app_id=app_id,
+            resource_type='security_config_update',
+            payload_before=payload_before,
+            section=section,
+            payload_applied={field: value}
+        )
 
         AuditLog.log(
             user_id=current_user.id,
@@ -1136,8 +1210,9 @@ def bulk_security_execute():
 
     action_info = actions[action]
     use_websocket = request.form.get('use_websocket') == '1'
+    batch_id = str(uuid.uuid4())
 
-    def _execute_bulk(action_info, app_selections, user_id, remote_addr):
+    def _execute_bulk(action_info, app_selections, user_id, remote_addr, batch_id):
         """Execute bulk operation (runs synchronously or in background)."""
         results = []
         for selection in app_selections:
@@ -1158,16 +1233,33 @@ def bulk_security_execute():
 
             try:
                 if action_info['method'] == 'security':
+                    try:
+                        payload_before = client.get_basic_security(app_name)
+                    except WaasApiError:
+                        payload_before = {}
                     client.update_security_config(app_name, action_info['data'])
+                    ConfigSnapshot.record(
+                        user_id=user_id, account_id=acct_id, app_id=app_name,
+                        resource_type='bulk_security_update', payload_before=payload_before,
+                        resource_label=str(action_info['label']), section='basic_security',
+                        payload_applied=action_info['data'], batch_id=batch_id
+                    )
                 elif action_info['method'] == 'endpoints':
                     app_export = client.get_application(app_name)
                     endpoints = app_export.get('endpoints', {})
+                    payload_before = copy.deepcopy(endpoints)
                     for key, value in action_info['data'].items():
                         if isinstance(value, dict) and isinstance(endpoints.get(key), dict):
                             endpoints[key].update(value)
                         else:
                             endpoints[key] = value
                     client.import_application(app_name, {'endpoints': endpoints}, include_endpoints=True)
+                    ConfigSnapshot.record(
+                        user_id=user_id, account_id=acct_id, app_id=app_name,
+                        resource_type='bulk_security_update', payload_before=payload_before,
+                        resource_label=str(action_info['label']), section='endpoints',
+                        payload_applied=endpoints, batch_id=batch_id
+                    )
 
                 results.append({
                     'app_name': app_name,
@@ -1190,6 +1282,7 @@ def bulk_security_execute():
 
         # Resolve translated label and capture app ref while in request context
         bulk_op_name = str(action_info['label'])
+        bulk_user_id = current_user.id
         app = current_app._get_current_object()
 
         # Pre-build clients per account while current_user is available
@@ -1222,16 +1315,33 @@ def bulk_security_execute():
 
                     try:
                         if action_info['method'] == 'security':
+                            try:
+                                payload_before = client.get_basic_security(app_name)
+                            except WaasApiError:
+                                payload_before = {}
                             client.update_security_config(app_name, action_info['data'])
+                            ConfigSnapshot.record(
+                                user_id=bulk_user_id, account_id=acct_id, app_id=app_name,
+                                resource_type='bulk_security_update', payload_before=payload_before,
+                                resource_label=bulk_op_name, section='basic_security',
+                                payload_applied=action_info['data'], batch_id=batch_id
+                            )
                         elif action_info['method'] == 'endpoints':
                             app_export = client.get_application(app_name)
                             endpoints = app_export.get('endpoints', {})
+                            payload_before = copy.deepcopy(endpoints)
                             for key, value in action_info['data'].items():
                                 if isinstance(value, dict) and isinstance(endpoints.get(key), dict):
                                     endpoints[key].update(value)
                                 else:
                                     endpoints[key] = value
                             client.import_application(app_name, {'endpoints': endpoints}, include_endpoints=True)
+                            ConfigSnapshot.record(
+                                user_id=bulk_user_id, account_id=acct_id, app_id=app_name,
+                                resource_type='bulk_security_update', payload_before=payload_before,
+                                resource_label=bulk_op_name, section='endpoints',
+                                payload_applied=endpoints, batch_id=batch_id
+                            )
                         return {'status': 'success'}
                     except WaasApiError as e:
                         return {'status': 'error', 'error': str(e)}
@@ -1248,7 +1358,7 @@ def bulk_security_execute():
         )
 
     # Synchronous fallback
-    results = _execute_bulk(action_info, app_selections, current_user.id, request.remote_addr)
+    results = _execute_bulk(action_info, app_selections, current_user.id, request.remote_addr, batch_id)
 
     total = len(results)
     succeeded = sum(1 for r in results if r['status'] == 'success')

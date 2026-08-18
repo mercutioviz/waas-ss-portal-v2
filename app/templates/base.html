@@ -70,13 +70,14 @@
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle {% if ep.startswith('logs.') or ep.startswith('reports.') %}active{% endif %}"
+                        <a class="nav-link dropdown-toggle {% if ep.startswith('logs.') or ep.startswith('reports.') or ep.startswith('config_history.') %}active{% endif %}"
                            href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-bar-chart"></i> {{ _('Observability') }}
                         </a>
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item {% if ep.startswith('logs.') %}active{% endif %}" href="{{ url_for('logs.index') }}"><i class="bi bi-journal-text"></i> {{ _('Logs') }}</a></li>
                             <li><a class="dropdown-item {% if ep.startswith('reports.') %}active{% endif %}" href="{{ url_for('reports.list_reports') }}"><i class="bi bi-calendar-check"></i> {{ _('Reports') }}</a></li>
+                            <li><a class="dropdown-item {% if ep.startswith('config_history.') %}active{% endif %}" href="{{ url_for('config_history.list_snapshots') }}"><i class="bi bi-clock-history"></i> {{ _('Config History') }}</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">

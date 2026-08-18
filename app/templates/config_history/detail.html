@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs, diff_modal %}
+{% block title %}{{ _('Config Snapshot') }} #{{ snapshot.id }} - {{ _('WaaS Portal') }}{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Config History'), url_for('config_history.list_snapshots')),
+    (_('Snapshot #%(id)s', id=snapshot.id), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mt-4 mb-3">
+    <div>
+        <h2>
+            <i class="bi bi-clock-history"></i> {{ _('Snapshot') }} #{{ snapshot.id }}
+            <span class="badge {{ resource_type_badges.get(snapshot.resource_type, 'bg-secondary') }}">{{ resource_type_labels.get(snapshot.resource_type, snapshot.resource_type) }}</span>
+        </h2>
+        <p class="text-muted mb-0">
+            {{ _('App') }}: <strong>{{ snapshot.app_id }}</strong>
+            &middot; {{ _('Account') }}: <strong>{{ account.account_name }}</strong>
+            {% if snapshot.section %}&middot; {{ _('Section') }}: <strong>{{ snapshot.section }}</strong>{% endif %}
+        </p>
+    </div>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-info" id="diffBtn"><i class="bi bi-file-diff"></i> {{ _('View Diff') }}</button>
+        {% if not snapshot.is_reverted and can_revert %}
+        <form method="POST" action="{{ url_for('config_history.revert', snapshot_id=snapshot.id) }}" data-confirm-message="{{ _('Revert this application to the state captured in this snapshot?') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-warning"><i class="bi bi-arrow-counterclockwise"></i> {{ _('Revert') }}</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-3">{{ _('Resource label') }}</dt>
+            <dd class="col-sm-9">{{ snapshot.resource_label or '—' }}</dd>
+
+            <dt class="col-sm-3">{{ _('Created') }}</dt>
+            <dd class="col-sm-9">{{ snapshot.created_at|datetime_format if snapshot.created_at else '—' }} {{ _('by') }} {{ snapshot.user.display_name if snapshot.user else '—' }}</dd>
+
+            {% if snapshot.batch_id %}
+            <dt class="col-sm-3">{{ _('Batch') }}</dt>
+            <dd class="col-sm-9"><code>{{ snapshot.batch_id }}</code></dd>
+            {% endif %}
+
+            <dt class="col-sm-3">{{ _('Status') }}</dt>
+            <dd class="col-sm-9">
+                {% if snapshot.is_reverted %}
+                <span class="badge bg-secondary">{{ _('Reverted') }}</span>
+                {{ snapshot.reverted_at|datetime_format }} {{ _('by') }} {{ snapshot.reverted_by.display_name if snapshot.reverted_by else '—' }}
+                {% else %}
+                <span class="badge bg-success">{{ _('Active') }}</span>
+                {% endif %}
+            </dd>
+
+            {% if snapshot.reverted_from %}
+            <dt class="col-sm-3">{{ _('This is a revert of') }}</dt>
+            <dd class="col-sm-9"><a href="{{ url_for('config_history.view_snapshot', snapshot_id=snapshot.reverted_from_id) }}">{{ _('Snapshot') }} #{{ snapshot.reverted_from_id }}</a></dd>
+            {% endif %}
+
+            {% if snapshot.reverts.count() %}
+            <dt class="col-sm-3">{{ _('Reverted by') }}</dt>
+            <dd class="col-sm-9">
+                {% for r in snapshot.reverts %}
+                <a href="{{ url_for('config_history.view_snapshot', snapshot_id=r.id) }}">{{ _('Snapshot') }} #{{ r.id }}</a>{% if not loop.last %}, {% endif %}
+                {% endfor %}
+            </dd>
+            {% endif %}
+        </dl>
+    </div>
+</div>
+
+{{ diff_modal('diffModal', title=_('Before / After')) }}
+
+<script id="snapshot-before" type="application/json">{{ (snapshot.payload_before_dict) | tojson }}</script>
+<script id="snapshot-applied" type="application/json">{{ (snapshot.payload_applied_dict or {}) | tojson }}</script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var diffBtn = document.getElementById('diffBtn');
+    var before = JSON.parse(document.getElementById('snapshot-before').textContent);
+    var applied = JSON.parse(document.getElementById('snapshot-applied').textContent);
+    diffBtn.addEventListener('click', function () {
+        document.getElementById('diffModal-content').innerHTML = window.renderJsonDiff(before, applied);
+        new bootstrap.Modal(document.getElementById('diffModal')).show();
+    });
+});
+</script>
+{% endblock %}

@@ -1,12 +1,13 @@
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, redirect, url_for, flash, request, make_response
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
 from werkzeug.utils import secure_filename
 from app import db
-from app.models import WaasAccount, AuditLog, ConfigTemplate, TemplateApplication, get_user_accounts, get_account_for_user, can_write
+from app.models import WaasAccount, AuditLog, ConfigTemplate, TemplateApplication, ConfigSnapshot, get_user_accounts, get_account_for_user, can_write
 from app.forms import ConfigTemplateForm, TemplateFromAppForm
 from app.waas_client import WaasClient, WaasApiError
 from app import limiter
@@ -325,11 +326,22 @@ def apply_template(template_id, account_id, app_id):
     include_endpoints = request.form.get('include_endpoints') == 'on'
 
     try:
+        payload_before = client.get_application(app_id)
         client.import_application(
             app_id,
             template.config_dict,
             include_servers=include_servers,
             include_endpoints=include_endpoints
+        )
+
+        ConfigSnapshot.record(
+            user_id=current_user.id,
+            account_id=account.id,
+            app_id=app_id,
+            resource_type='template_apply',
+            payload_before=payload_before,
+            resource_label=template.name,
+            payload_applied=template.config_dict
         )
 
         ta = TemplateApplication.query.filter_by(
@@ -387,6 +399,7 @@ def bulk_apply(template_id):
             return redirect(url_for('templates.bulk_apply', template_id=template_id))
 
         results = []
+        batch_id = str(uuid.uuid4())
         for app_entry in selected_apps:
             # Format: "account_id:app_name"
             try:
@@ -402,11 +415,22 @@ def bulk_apply(template_id):
                 continue
 
             try:
+                payload_before = client.get_application(app_name)
                 client.import_application(
                     app_name,
                     template.config_dict,
                     include_servers=include_servers,
                     include_endpoints=include_endpoints
+                )
+                ConfigSnapshot.record(
+                    user_id=current_user.id,
+                    account_id=account.id,
+                    app_id=app_name,
+                    resource_type='template_bulk_apply',
+                    payload_before=payload_before,
+                    resource_label=template.name,
+                    payload_applied=template.config_dict,
+                    batch_id=batch_id
                 )
                 results.append({'app': app_name, 'account': account.account_name, 'success': True, 'error': None})
                 ta = TemplateApplication.query.filter_by(

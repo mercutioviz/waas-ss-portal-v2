@@ -478,6 +478,34 @@ class WaasClient:
         return self._make_request('DELETE', f'/applications/{app_id}/')
 
     # === Application Security Config ===
+    def get_basic_security(self, app_id):
+        """Get basic security configuration (protection mode) (v4 API).
+
+        Endpoint: GET /applications/{appName}/basic_security/
+        """
+        return self._make_request('GET', f'/applications/{app_id}/basic_security/')
+
+    def get_request_limits(self, app_id):
+        """Get request limits configuration (v4 API).
+
+        Endpoint: GET /applications/{appName}/request_limits/
+        """
+        return self._make_request('GET', f'/applications/{app_id}/request_limits/')
+
+    def get_clickjacking_protection(self, app_id):
+        """Get clickjacking protection configuration (v4 API).
+
+        Endpoint: GET /applications/{appName}/clickjacking_protection/
+        """
+        return self._make_request('GET', f'/applications/{app_id}/clickjacking_protection/')
+
+    def get_data_theft_protection(self, app_id):
+        """Get data theft protection configuration (v4 API).
+
+        Endpoint: GET /applications/{appName}/data_theft_protection/
+        """
+        return self._make_request('GET', f'/applications/{app_id}/data_theft_protection/')
+
     def get_security_config(self, app_id):
         """Get combined security configuration for an application (v4 API).
 
@@ -491,28 +519,28 @@ class WaasClient:
 
         # Basic security (protection mode)
         try:
-            basic = self._make_request('GET', f'/applications/{app_id}/basic_security/')
+            basic = self.get_basic_security(app_id)
             config.update(basic if isinstance(basic, dict) else {})
         except WaasApiError:
             pass
 
         # Request limits
         try:
-            limits = self._make_request('GET', f'/applications/{app_id}/request_limits/')
+            limits = self.get_request_limits(app_id)
             config['request_limits'] = limits if isinstance(limits, dict) else {}
         except WaasApiError:
             pass
 
         # Clickjacking protection
         try:
-            clickjack = self._make_request('GET', f'/applications/{app_id}/clickjacking_protection/')
+            clickjack = self.get_clickjacking_protection(app_id)
             config['clickjacking_protection'] = clickjack if isinstance(clickjack, dict) else {}
         except WaasApiError:
             pass
 
         # Data theft protection
         try:
-            dtp = self._make_request('GET', f'/applications/{app_id}/data_theft_protection/')
+            dtp = self.get_data_theft_protection(app_id)
             config['data_theft_protection'] = dtp if isinstance(dtp, dict) else {}
         except WaasApiError:
             pass

@@ -361,5 +361,35 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    // -------------------------------------------------------
+    // Shared JSON before/after diff renderer (Config History, inline editors)
+    // -------------------------------------------------------
+    function escHtmlForDiff(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    window.renderJsonDiff = function (before, after) {
+        var oldLines = JSON.stringify(before, null, 2).split('\n');
+        var newLines = JSON.stringify(after, null, 2).split('\n');
+        var maxLen = Math.max(oldLines.length, newLines.length);
+        var html = '';
+        for (var i = 0; i < maxLen; i++) {
+            var ol = i < oldLines.length ? oldLines[i] : undefined;
+            var nl = i < newLines.length ? newLines[i] : undefined;
+            if (ol === nl) {
+                html += '<div class="px-2">' + escHtmlForDiff(nl) + '</div>';
+            } else if (ol !== undefined && nl !== undefined) {
+                html += '<div class="diff-modified px-2">' + escHtmlForDiff(nl) + '</div>';
+            } else if (ol === undefined) {
+                html += '<div class="diff-added px-2">+ ' + escHtmlForDiff(nl) + '</div>';
+            } else {
+                html += '<div class="diff-removed px-2">- ' + escHtmlForDiff(ol) + '</div>';
+            }
+        }
+        return html || '<div class="text-muted p-3">No changes detected.</div>';
+    };
+
     console.log('WaaS Portal initialized.');
 });

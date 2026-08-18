@@ -87,6 +87,9 @@
                     <a href="{{ url_for('applications.dns_info', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-info">
                         <i class="bi bi-diagram-3"></i> {{ _('DNS / CNAME Info') }}
                     </a>
+                    <a href="{{ url_for('config_history.list_snapshots', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-clock-history"></i> {{ _('Config History') }}
+                    </a>
                     <a href="{{ url_for('proxy.launch', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-primary">
                         <i class="bi bi-display"></i> {{ _('Browse Application via Proxy') }}
                     </a>

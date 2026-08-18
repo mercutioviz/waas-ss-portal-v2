@@ -262,6 +262,79 @@ class AuditLog(db.Model):
         }
 
 
+class ConfigSnapshot(db.Model):
+    """Model recording before-state for config-mutating actions, enabling rollback"""
+    __tablename__ = 'config_snapshots'
+
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('waas_accounts.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    app_id = db.Column(db.String(255), nullable=False, index=True)
+    app_name = db.Column(db.String(255))
+    resource_type = db.Column(db.String(50), nullable=False, index=True)
+    resource_label = db.Column(db.String(255))
+    section = db.Column(db.String(50))
+    payload_before = db.Column(db.Text, nullable=False, default='{}')
+    payload_applied = db.Column(db.Text)
+    batch_id = db.Column(db.String(36), index=True)
+    reverted_at = db.Column(db.DateTime)
+    reverted_by_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    reverted_from_id = db.Column(db.Integer, db.ForeignKey('config_snapshots.id', ondelete='SET NULL'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    account = db.relationship('WaasAccount', backref=db.backref('config_snapshots', lazy='dynamic'))
+    user = db.relationship('User', foreign_keys=[user_id])
+    reverted_by = db.relationship('User', foreign_keys=[reverted_by_id])
+    reverted_from = db.relationship('ConfigSnapshot', remote_side=[id], backref=db.backref('reverts', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<ConfigSnapshot {self.id}: {self.resource_type} app={self.app_id}>'
+
+    @property
+    def payload_before_dict(self):
+        """Parse payload_before JSON string into a dict"""
+        try:
+            return json.loads(self.payload_before) if self.payload_before else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @property
+    def payload_applied_dict(self):
+        """Parse payload_applied JSON string into a dict (None if unset)"""
+        if not self.payload_applied:
+            return None
+        try:
+            return json.loads(self.payload_applied)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    @property
+    def is_reverted(self):
+        return self.reverted_at is not None
+
+    @staticmethod
+    def record(user_id, account_id, app_id, resource_type, payload_before, app_name=None,
+               resource_label=None, section=None, payload_applied=None, batch_id=None,
+               reverted_from_id=None):
+        """Convenience method to create a config snapshot entry"""
+        snap = ConfigSnapshot(
+            user_id=user_id,
+            account_id=account_id,
+            app_id=app_id,
+            app_name=app_name,
+            resource_type=resource_type,
+            resource_label=resource_label,
+            section=section,
+            payload_before=json.dumps(payload_before),
+            payload_applied=json.dumps(payload_applied) if payload_applied is not None else None,
+            batch_id=batch_id,
+            reverted_from_id=reverted_from_id,
+        )
+        db.session.add(snap)
+        db.session.commit()
+        return snap
+
+
 class ProxySession(db.Model):
     """Model for noVNC browser proxy sessions"""
     __tablename__ = 'proxy_sessions'

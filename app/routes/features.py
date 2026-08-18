@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, redirect, url_for, flash, request, make_response
 from flask_login import login_required, current_user
@@ -7,7 +8,7 @@ from flask_babel import gettext as _
 from werkzeug.utils import secure_filename
 from app import db
 from app.models import (
-    WaasAccount, AuditLog, Feature, FeatureApplication,
+    WaasAccount, AuditLog, Feature, FeatureApplication, ConfigSnapshot,
     get_user_accounts, get_account_for_user, can_write,
 )
 from app.forms import FeatureForm, FeatureFromAppForm
@@ -385,7 +386,18 @@ def apply_feature(feature_id, account_id, app_id):
         return redirect(url_for('features.view_feature', feature_id=feature_id))
 
     try:
+        payload_before = client.get_application(app_id)
         apply_feature_to_app(client, feature, app_id)
+
+        ConfigSnapshot.record(
+            user_id=current_user.id,
+            account_id=account.id,
+            app_id=app_id,
+            resource_type='raw_config_apply',
+            payload_before=payload_before,
+            resource_label=feature.name,
+            payload_applied=feature.config_dict
+        )
 
         # Upsert FeatureApplication record
         fa = FeatureApplication.query.filter_by(
@@ -444,6 +456,7 @@ def bulk_apply(feature_id):
             return redirect(url_for('features.bulk_apply', feature_id=feature_id))
 
         results = []
+        batch_id = str(uuid.uuid4())
         for app_entry in selected_apps:
             try:
                 acct_id_str, app_name = app_entry.split(':', 1)
@@ -458,7 +471,18 @@ def bulk_apply(feature_id):
                 continue
 
             try:
+                payload_before = client.get_application(app_name)
                 apply_feature_to_app(client, feature, app_name)
+                ConfigSnapshot.record(
+                    user_id=current_user.id,
+                    account_id=account.id,
+                    app_id=app_name,
+                    resource_type='raw_config_bulk_apply',
+                    payload_before=payload_before,
+                    resource_label=feature.name,
+                    payload_applied=feature.config_dict,
+                    batch_id=batch_id
+                )
                 # Upsert FeatureApplication
                 fa = FeatureApplication.query.filter_by(
                     feature_id=feature.id, account_id=acct_id, app_name=app_name
