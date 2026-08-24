@@ -125,6 +125,9 @@
                             <a href="{{ url_for('logs.fp_analysis', account_id=account.id, app_name=app_id, from='app') }}" class="btn btn-outline-warning">
                                 <i class="bi bi-search"></i> {{ _('FP Analysis') }}
                             </a>
+                            <a href="{{ url_for('applications.security_dashboard', account_id=account.id, app_id=app_id) }}" class="btn btn-outline-success">
+                                <i class="bi bi-shield-check"></i> {{ _('Dashboard') }}
+                            </a>
                         </div>
                     </div>
                 </div>

@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Security Dashboard') }} - {{ app_id }} - WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications') }}">{{ _('Applications') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.list_applications', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('applications.view_application', account_id=account.id, app_id=app_id) }}">{{ app_id }}</a></li>
+        <li class="breadcrumb-item active">{{ _('Security Dashboard') }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<style>
+    :root {
+        --viz-accent: #2a78d6;
+        --viz-accent-wash: rgba(42, 120, 214, 0.12);
+    }
+    [data-bs-theme="dark"] {
+        --viz-accent: #3987e5;
+        --viz-accent-wash: rgba(57, 135, 229, 0.16);
+    }
+    .stat-tile .stat-value { font-size: 1.9rem; font-weight: 600; }
+    .stat-tile .stat-sparkline { height: 32px; }
+    .top-n-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .top-n-key {
+        flex: 0 0 auto;
+        max-width: 55%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.85rem;
+    }
+    .top-n-track {
+        flex: 1 1 auto;
+        background-color: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.05));
+        border-radius: 4px;
+        height: 20px;
+        position: relative;
+    }
+    .top-n-bar {
+        background-color: var(--viz-accent);
+        border-radius: 4px;
+        height: 100%;
+        min-width: 4px;
+    }
+    .top-n-count {
+        flex: 0 0 auto;
+        font-size: 0.8rem;
+        color: var(--bs-secondary-color);
+        min-width: 2.5em;
+        text-align: right;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mt-4 mb-4">
+    <h2><i class="bi bi-shield-check"></i> {{ _('Security Dashboard') }}</h2>
+    <div class="btn-group btn-group-sm" id="range-selector">
+        <button type="button" class="btn btn-outline-secondary active" data-range="r_1h">{{ _('1h') }}</button>
+        <button type="button" class="btn btn-outline-secondary" data-range="r_24h">{{ _('24h') }}</button>
+        <button type="button" class="btn btn-outline-secondary" data-range="r_7d">{{ _('7d') }}</button>
+        <button type="button" class="btn btn-outline-secondary" data-range="r_30d">{{ _('30d') }}</button>
+    </div>
+</div>
+
+<div id="truncated-note" class="alert alert-warning d-none py-2 small mb-3"></div>
+
+<!-- KPI row -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 stat-tile">
+            <div class="card-body">
+                <div class="text-muted small">{{ _('Blocks') }} <span id="range-label-1">({{ _('last 1h') }})</span></div>
+                <div class="stat-value" id="stat-blocked">&mdash;</div>
+                <div class="stat-sparkline"><canvas id="blockedSparkline"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 stat-tile">
+            <div class="card-body">
+                <div class="text-muted small">{{ _('Total WAF events') }} <span id="range-label-2">({{ _('last 1h') }})</span></div>
+                <div class="stat-value" id="stat-total">&mdash;</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 stat-tile">
+            <div class="card-body">
+                <div class="text-muted small">{{ _('Unique client IPs') }}</div>
+                <div class="stat-value" id="stat-ips">&mdash;</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card h-100 stat-tile">
+            <div class="card-body">
+                <div class="text-muted small">{{ _('Rules triggered') }}</div>
+                <div class="stat-value" id="stat-rules">&mdash;</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Trend chart -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-graph-up"></i> {{ _('Blocked Request Trend') }}</h6>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-table-view">{{ _('View as table') }}</button>
+    </div>
+    <div class="card-body">
+        <div style="position: relative; height: 220px;" id="trend-chart-wrap">
+            <canvas id="trendChart"></canvas>
+        </div>
+        <div id="trend-empty" class="text-center py-4 text-muted d-none">
+            <i class="bi bi-graph-up display-6"></i>
+            <p class="mt-2 mb-0">{{ _('No WAF events in this time range.') }}</p>
+        </div>
+        <div id="trend-table-wrap" class="table-responsive d-none mt-3">
+            <table class="table table-sm">
+                <thead><tr><th>{{ _('Time') }}</th><th>{{ _('Blocked events') }}</th></tr></thead>
+                <tbody id="trend-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Top-N lists -->
+<div class="row g-4">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-list-check"></i> {{ _('Top Rules') }}</h6></div>
+            <div class="card-body" id="top-rules-body">
+                <div class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm" role="status"></span></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-geo-alt"></i> {{ _('Top Client IPs') }}</h6></div>
+            <div class="card-body" id="top-ips-body">
+                <div class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm" role="status"></span></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-link-45deg"></i> {{ _('Top URLs') }}</h6></div>
+            <div class="card-body" id="top-urls-body">
+                <div class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm" role="status"></span></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var dataUrl = '{{ url_for("applications.security_dashboard_data", account_id=account.id, app_id=app_id) }}';
+    var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    var accent = isDark ? '#3987e5' : '#2a78d6';
+    var accentWash = isDark ? 'rgba(57, 135, 229, 0.16)' : 'rgba(42, 120, 214, 0.12)';
+    var gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+    var textColor = isDark ? '#adb5bd' : '#666';
+    Chart.defaults.color = textColor;
+    Chart.defaults.borderColor = gridColor;
+
+    var RANGE_LABELS = {
+        'r_1h': '{{ _("last 1h") }}',
+        'r_24h': '{{ _("last 24h") }}',
+        'r_7d': '{{ _("last 7d") }}',
+        'r_30d': '{{ _("last 30d") }}'
+    };
+
+    var trendChart = null;
+    var sparklineChart = null;
+    var lastTimeline = [];
+    var pollTimer = null;
+    var currentRange = 'r_1h';
+
+    function fmtCompact(n) {
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+        return String(n);
+    }
+
+    function renderSparkline(timeline) {
+        if (sparklineChart) sparklineChart.destroy();
+        var ctx = document.getElementById('blockedSparkline').getContext('2d');
+        sparklineChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: timeline.map(function(b) { return b.bucket_label; }),
+                datasets: [{
+                    data: timeline.map(function(b) { return b.count; }),
+                    borderColor: accent,
+                    backgroundColor: accentWash,
+                    fill: true,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                scales: { x: { display: false }, y: { display: false } }
+            }
+        });
+    }
+
+    function renderTrendChart(timeline) {
+        var wrap = document.getElementById('trend-chart-wrap');
+        var empty = document.getElementById('trend-empty');
+        var total = timeline.reduce(function(sum, b) { return sum + b.count; }, 0);
+        if (trendChart) trendChart.destroy();
+        if (!total) {
+            wrap.classList.add('d-none');
+            empty.classList.remove('d-none');
+            return;
+        }
+        wrap.classList.remove('d-none');
+        empty.classList.add('d-none');
+        var ctx = document.getElementById('trendChart').getContext('2d');
+        trendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: timeline.map(function(b) { return b.bucket_label; }),
+                datasets: [{
+                    label: '{{ _("Blocked events") }}',
+                    data: timeline.map(function(b) { return b.count; }),
+                    borderColor: accent,
+                    backgroundColor: accentWash,
+                    fill: true,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { maxRotation: 45, maxTicksLimit: 12 } },
+                    y: { beginAtZero: true, ticks: { precision: 0 } }
+                }
+            }
+        });
+    }
+
+    function renderTopN(containerId, items, emptyLabel) {
+        var el = document.getElementById(containerId);
+        if (!items.length) {
+            el.innerHTML = '<div class="text-center text-muted py-3 small">' + emptyLabel + '</div>';
+            return;
+        }
+        var max = items[0].count || 1;
+        var html = '';
+        items.forEach(function(item) {
+            var pct = Math.max(4, Math.round((item.count / max) * 100));
+            html += '<div class="top-n-row">'
+                + '<div class="top-n-key" title="' + escapeHtml(item.key) + '">' + escapeHtml(item.key) + '</div>'
+                + '<div class="top-n-track"><div class="top-n-bar" style="width: ' + pct + '%"></div></div>'
+                + '<div class="top-n-count">' + item.count + '</div>'
+                + '</div>';
+        });
+        el.innerHTML = html;
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function(c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    function renderTable(timeline) {
+        var body = document.getElementById('trend-table-body');
+        body.innerHTML = timeline.map(function(b) {
+            return '<tr><td>' + escapeHtml(b.bucket_label) + '</td><td>' + b.count + '</td></tr>';
+        }).join('');
+    }
+
+    function load(range) {
+        currentRange = range;
+        var label = RANGE_LABELS[range] || range;
+        document.getElementById('range-label-1').textContent = '(' + label + ')';
+        document.getElementById('range-label-2').textContent = '(' + label + ')';
+
+        fetch(dataUrl + '?quick_range=' + range)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) { throw new Error(data.error); }
+                document.getElementById('stat-blocked').textContent = fmtCompact(data.blocked_count);
+                document.getElementById('stat-total').textContent = fmtCompact(data.total_events);
+                document.getElementById('stat-ips').textContent = fmtCompact(data.unique_ip_count);
+                document.getElementById('stat-rules').textContent = fmtCompact(data.unique_rule_count);
+
+                lastTimeline = data.timeline || [];
+                renderSparkline(lastTimeline);
+                renderTrendChart(lastTimeline);
+                renderTable(lastTimeline);
+                renderTopN('top-rules-body', data.top_rules || [], '{{ _("No rules triggered.") }}');
+                renderTopN('top-ips-body', data.top_ips || [], '{{ _("No client IPs recorded.") }}');
+                renderTopN('top-urls-body', data.top_urls || [], '{{ _("No URLs recorded.") }}');
+
+                var note = document.getElementById('truncated-note');
+                if (data.truncated) {
+                    note.textContent = '{{ _("Showing the latest 1,000 of") }} ' + data.total_from_api + ' {{ _("events — top lists and trend may be incomplete for this range.") }}';
+                    note.classList.remove('d-none');
+                } else {
+                    note.classList.add('d-none');
+                }
+            })
+            .catch(function(err) {
+                console.error('Security dashboard data error:', err);
+            });
+    }
+
+    document.querySelectorAll('#range-selector button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelector('#range-selector .active').classList.remove('active');
+            btn.classList.add('active');
+            load(btn.dataset.range);
+        });
+    });
+
+    document.getElementById('toggle-table-view').addEventListener('click', function() {
+        var chartWrap = document.getElementById('trend-chart-wrap');
+        var tableWrap = document.getElementById('trend-table-wrap');
+        var showingTable = !tableWrap.classList.contains('d-none');
+        if (showingTable) {
+            tableWrap.classList.add('d-none');
+            if (lastTimeline.reduce(function(s, b) { return s + b.count; }, 0)) chartWrap.classList.remove('d-none');
+            this.textContent = '{{ _("View as table") }}';
+        } else {
+            chartWrap.classList.add('d-none');
+            tableWrap.classList.remove('d-none');
+            this.textContent = '{{ _("View as chart") }}';
+        }
+    });
+
+    function schedulePoll() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(function() {
+            if (!document.hidden) load(currentRange);
+        }, 45000);
+    }
+
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) load(currentRange);
+    });
+
+    load('r_1h');
+    schedulePoll();
+});
+</script>
+{% endblock extra_js %}

@@ -15,6 +15,8 @@ from app.validation_schemas import (
     ENDPOINT_TLS_FIELDS, ENDPOINT_PORT_FIELDS, SECURITY_SECTION_SCHEMAS,
     BULK_SECURITY_ACTIONS,
 )
+from app.security_dashboard import aggregate_waf_logs
+from app.routes.logs import QUICK_RANGES
 
 logger = logging.getLogger(__name__)
 
@@ -557,6 +559,53 @@ def dns_info(account_id, app_id):
         dns=dns,
         app_id=app_id
     )
+
+
+@bp.route('/<int:account_id>/<app_id>/dashboard')
+@login_required
+def security_dashboard(account_id, app_id):
+    """Per-app security dashboard: page shell only — data loads via AJAX."""
+    client, account, perm = get_client_for_account(account_id)
+    if not client:
+        flash(_('Account not found or inactive.'), 'danger')
+        return redirect(url_for('applications.list_applications'))
+
+    return render_template(
+        'applications/security_dashboard.html',
+        account=account,
+        app_id=app_id,
+    )
+
+
+@bp.route('/<int:account_id>/<app_id>/dashboard/data')
+@login_required
+def security_dashboard_data(account_id, app_id):
+    """JSON endpoint polled by the security dashboard page."""
+    client, account, perm = get_client_for_account(account_id)
+    if not client:
+        return jsonify({'error': 'Account not found or inactive.'}), 404
+
+    valid_ranges = {value for value, _label in QUICK_RANGES}
+    quick_range = request.args.get('quick_range', 'r_1h')
+    if quick_range not in valid_ranges:
+        quick_range = 'r_1h'
+
+    try:
+        result = client.get_logs(
+            app_id,
+            quick_range=quick_range,
+            items_per_page=1000,
+            filter_fields={'LogType': [{'condition': 'is', 'value': 'WF'}]},
+        )
+    except WaasApiError as e:
+        return jsonify({'error': str(e)}), 502
+
+    logs = result.get('results', []) if isinstance(result, dict) else []
+    total_from_api = result.get('count', len(logs)) if isinstance(result, dict) else len(logs)
+
+    data = aggregate_waf_logs(logs, quick_range, total_from_api=total_from_api)
+    data['quick_range'] = quick_range
+    return jsonify(data)
 
 
 # ---- Phase 8: Configuration Editing & Bulk Operations ----
