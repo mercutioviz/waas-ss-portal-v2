@@ -4,6 +4,7 @@ import pytest
 
 from app.profiler.recommender import ALLOWED_FORM_FIELDS, recommend
 from app.profiler.schemas import (
+    ApexWwwCheck,
     CookieAnalysis,
     DnsResult,
     DnsSecurityReport,
@@ -58,6 +59,7 @@ def _profile(
     subresources=None,
     dns_security=None,
     bot_management=None,
+    apex_www=None,
 ):
     if target_url is None:
         target_url = f'https://{hostname}/'
@@ -87,6 +89,7 @@ def _profile(
         subresources=subresources if subresources is not None else SubresourceReport(),
         dns_security=dns_security if dns_security is not None else _clean_dns_security(),
         bot_management=list(bot_management) if bot_management is not None else [],
+        apex_www=apex_www if apex_www is not None else ApexWwwCheck(),
     )
 
 
@@ -299,3 +302,35 @@ class TestSubresourceAdvisories:
     def test_light_page_no_traffic_advisory(self):
         result = recommend(_profile(subresources=self._sub_report(total_bytes=200_000)))
         assert not any('heavy' in t.lower() for t in _titles(result))
+
+
+class TestApexWwwAdvisories:
+    def test_bad_direction_produces_warning(self):
+        aw = ApexWwwCheck(
+            apex='eesforjobs.com', www_host='www.eesforjobs.com', applicable=True,
+            www_status=301, www_redirects_to_apex=True, verdict='warning',
+            message='WARNING - must be changed',
+        )
+        result = recommend(_profile(apex_www=aw))
+        titles = _titles(result)
+        assert any(t.startswith('WARNING - must be changed') for t in titles)
+        severities = {a['severity'] for a in result['advisories'] if a['title'].startswith('WARNING - must be changed')}
+        assert severities == {'warning'}
+
+    def test_good_direction_produces_info(self):
+        aw = ApexWwwCheck(
+            apex='acme.com', www_host='www.acme.com', applicable=True,
+            apex_status=301, apex_redirects_to_www=True, verdict='good',
+            message='Redirect is good',
+        )
+        result = recommend(_profile(apex_www=aw))
+        assert any(t.startswith('Redirect is good') for t in _titles(result))
+
+    def test_not_applicable_produces_no_advisory(self):
+        result = recommend(_profile(apex_www=ApexWwwCheck(applicable=False)))
+        assert not any('redirect is good' in t.lower() or 'must be changed' in t.lower() for t in _titles(result))
+
+    def test_neither_direction_produces_no_advisory(self):
+        aw = ApexWwwCheck(apex='acme.com', www_host='www.acme.com', applicable=True, verdict='none')
+        result = recommend(_profile(apex_www=aw))
+        assert not any('redirect is good' in t.lower() or 'must be changed' in t.lower() for t in _titles(result))

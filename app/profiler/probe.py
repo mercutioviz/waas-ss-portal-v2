@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 import requests
 
 from app.profiler import (
+    apex_www,
     bot_mgmt,
     cookie_analysis,
     dns_security,
@@ -54,6 +55,7 @@ PROBE_STEPS: list[ProbeStep] = [
     ProbeStep('ssrf', 'Safety check'),
     ProbeStep('tls', 'TLS handshake'),
     ProbeStep('http_redirect', 'Checking HTTP → HTTPS redirect'),
+    ProbeStep('apex_www', 'Checking apex/www redirect setup'),
     ProbeStep('https_root', 'Fetching landing page'),
     ProbeStep('security_headers', 'Auditing security headers'),
     ProbeStep('cookies', 'Analyzing cookies'),
@@ -287,6 +289,20 @@ def run_probe(target_url: str, emit: Optional[EmitCallback] = None) -> SiteProfi
     except ProbeBudgetExceeded:
         emit('http_redirect', 'skip', {'error': 'time budget exceeded'})
         return _finalize(profile)
+
+    # 4b. Apex ⇄ www redirect direction — WaaS only supports apex → www.
+    emit('apex_www', 'start')
+    if _budget_remaining(deadline) > 3.0:
+        profile.apex_www = apex_www.analyze(
+            hostname, resolve=_resolve, is_public_ip=_is_public_ip,
+            timeout=min(REQUEST_TIMEOUT_SECONDS, _budget_remaining(deadline)),
+        )
+        emit('apex_www', 'ok', {
+            'verdict': profile.apex_www.verdict,
+            'message': profile.apex_www.message,
+        })
+    else:
+        emit('apex_www', 'skip', {'error': 'time budget exceeded'})
 
     # 5. HTTPS landing page
     emit('https_root', 'start')

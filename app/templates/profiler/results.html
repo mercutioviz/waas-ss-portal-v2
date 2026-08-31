@@ -66,6 +66,7 @@
 {% set tech = probe.get('tech_stack', []) %}
 {% set dns_sec = probe.get('dns_security', {}) %}
 {% set bots = probe.get('bot_management', []) %}
+{% set aw = probe.get('apex_www', {}) %}
 
 <div class="mt-4 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
@@ -133,6 +134,55 @@
         <dd class="col-sm-8"><code>{{ https_root.get('headers', {}).get('Content-Type', '—') }}</code></dd>
     </dl>
     {% endcall %}
+
+    {# ── Apex ⇄ www redirect direction (only when applicable) ── #}
+    {% if aw.get('applicable') %}
+    {% call card('apex_www', _('Apex / www redirect'), 'arrow-left-right') %}
+    <dl class="row mb-2">
+        <dt class="col-sm-4">{{ _('Apex') }}</dt>
+        <dd class="col-sm-8">
+            <code>{{ aw.apex }}</code>
+            {% if aw.apex_dns_found %}
+                <span class="text-success">✓ DNS</span>
+                {% if aw.apex_status %}
+                    — HTTP {{ aw.apex_status }}
+                    {% if aw.apex_redirect_target %}→ <code>{{ aw.apex_redirect_target }}</code>{% endif %}
+                {% endif %}
+            {% else %}
+                <span class="text-muted">✗ {{ _('no DNS entry') }}</span>
+            {% endif %}
+        </dd>
+        <dt class="col-sm-4">{{ _('www FQDN') }}</dt>
+        <dd class="col-sm-8">
+            <code>{{ aw.www_host }}</code>
+            {% if aw.www_dns_found %}
+                <span class="text-success">✓ DNS</span>
+                {% if aw.www_status %}
+                    — HTTP {{ aw.www_status }}
+                    {% if aw.www_redirect_target %}→ <code>{{ aw.www_redirect_target }}</code>{% endif %}
+                {% endif %}
+            {% else %}
+                <span class="text-muted">✗ {{ _('no DNS entry') }}</span>
+            {% endif %}
+        </dd>
+    </dl>
+    {% if aw.verdict == 'warning' %}
+        <div class="alert alert-warning py-2 mb-0">
+            <i class="bi bi-exclamation-triangle"></i>
+            <strong>{{ aw.message }}</strong> —
+            {{ _('%(www)s redirects to %(apex)s. WaaS does not support a FQDN → apex redirect; it must be the other way around.', www=aw.www_host, apex=aw.apex) }}
+        </div>
+    {% elif aw.verdict == 'good' %}
+        <div class="alert alert-success py-2 mb-0">
+            <i class="bi bi-check-circle"></i>
+            <strong>{{ aw.message }}</strong> —
+            {{ _('%(apex)s redirects to %(www)s, which is what WaaS supports.', apex=aw.apex, www=aw.www_host) }}
+        </div>
+    {% else %}
+        <p class="text-muted mb-0">{{ _('Neither host redirects to the other.') }}</p>
+    {% endif %}
+    {% endcall %}
+    {% endif %}
 
     {# ── Traffic ── #}
     {% call card('traffic', _('Traffic'), 'bar-chart-line') %}

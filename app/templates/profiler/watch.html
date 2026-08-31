@@ -102,6 +102,7 @@
         if (stepKey === 'dns' && data.addresses) return data.addresses.slice(0, 2).join(', ');
         if (stepKey === 'tls' && data.version) return data.version + (data.cipher ? ' · ' + data.cipher : '');
         if (stepKey === 'http_redirect' && data.status) return 'HTTP ' + data.status + (data.redirect_target ? ' → ' + data.redirect_target : '');
+        if (stepKey === 'apex_www') return data.message || {{ _("not applicable")|tojson }};
         if (stepKey === 'https_root' && data.status) return 'HTTPS ' + data.status;
         if (stepKey === 'security_headers') {
             var parts = [];

@@ -126,6 +126,29 @@ class BotVendor:
 
 
 @dataclass
+class ApexWwwCheck:
+    """Apex ⇄ www redirect-direction check.
+
+    WaaS only supports apex → www redirects, not the reverse. We probe both
+    hosts (whichever one the user actually typed in) so the bad pattern is
+    caught either way.
+    """
+    apex: str = ''
+    www_host: str = ''
+    applicable: bool = False                     # False when target isn't apex/www shaped
+    apex_dns_found: bool = False
+    www_dns_found: bool = False
+    apex_status: Optional[int] = None
+    www_status: Optional[int] = None
+    apex_redirect_target: Optional[str] = None    # raw Location header, if any
+    www_redirect_target: Optional[str] = None
+    apex_redirects_to_www: bool = False
+    www_redirects_to_apex: bool = False
+    verdict: str = 'none'                          # 'good' | 'warning' | 'none' | 'not_applicable'
+    message: Optional[str] = None                 # 'Redirect is good' | 'WARNING - must be changed'
+
+
+@dataclass
 class SiteProfile:
     """Everything the probe learned about the target site."""
     target_url: str
@@ -147,6 +170,7 @@ class SiteProfile:
     subresources: SubresourceReport = field(default_factory=SubresourceReport)
     dns_security: DnsSecurityReport = field(default_factory=DnsSecurityReport)
     bot_management: list[BotVendor] = field(default_factory=list)
+    apex_www: ApexWwwCheck = field(default_factory=ApexWwwCheck)
 
     def to_dict(self) -> dict:
         return asdict(self)

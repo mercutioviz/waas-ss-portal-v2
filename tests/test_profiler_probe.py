@@ -105,6 +105,7 @@ class TestHappyPath:
             'Server': 'nginx/1.24.0',
             'Content-Type': 'text/html; charset=utf-8',
         }, text='<html><body>Hello</body></html>')
+        http.get('https://www.example.com/', status_code=200)
         http.get('https://example.com/robots.txt', status_code=200, text='User-agent: *\nDisallow:\n')
 
         profile = run_probe('https://example.com/')
@@ -117,6 +118,7 @@ class TestHappyPath:
         assert 'nginx' in profile.tech_names
         assert profile.robots_txt.startswith('User-agent:')
         assert profile.confidence == 'high'
+        assert profile.apex_www.verdict == 'none'
 
     def test_wordpress_body_is_fingerprinted(self, stub_dns, stub_tls, http):
         stub_dns(['93.184.216.34'])
@@ -124,10 +126,27 @@ class TestHappyPath:
         http.get('http://example.com/', status_code=301, headers={'Location': 'https://example.com/'})
         http.get('https://example.com/', status_code=200, headers={'Server': 'nginx'},
                  text='<link href="/wp-content/themes/x.css"><input type="password">')
+        http.get('https://www.example.com/', status_code=200)
         http.get('https://example.com/robots.txt', status_code=404)
 
         profile = run_probe('https://example.com/')
         assert 'WordPress' in profile.tech_names
+
+
+class TestApexWwwIntegration:
+    def test_www_to_apex_redirect_surfaces_as_warning(self, stub_dns, stub_tls, http):
+        stub_dns(['93.184.216.34'])
+        stub_tls(TlsResult(handshake_ok=True, tls_version='TLSv1.3'))
+        http.get('http://example.com/', status_code=301, headers={'Location': 'https://example.com/'})
+        http.get('https://example.com/', status_code=200, text='')
+        http.get('https://www.example.com/', status_code=301, headers={'Location': 'https://example.com/'})
+        http.get('https://example.com/robots.txt', status_code=404)
+
+        profile = run_probe('https://example.com/')
+
+        assert profile.apex_www.applicable is True
+        assert profile.apex_www.verdict == 'warning'
+        assert profile.apex_www.message == 'WARNING - must be changed'
 
 
 class TestLowConfidenceOutcomes:
@@ -136,6 +155,7 @@ class TestLowConfidenceOutcomes:
         stub_tls(TlsResult(handshake_ok=False, error='cert expired'))
         http.get('http://example.com/', status_code=200)
         http.get('https://example.com/', status_code=200, text='')
+        http.get('https://www.example.com/', status_code=200)
         http.get('https://example.com/robots.txt', status_code=404)
 
         profile = run_probe('https://example.com/')
@@ -147,6 +167,7 @@ class TestLowConfidenceOutcomes:
         stub_tls(TlsResult(handshake_ok=True, tls_version='TLSv1.3'))
         http.get('http://example.com/', status_code=200)
         http.get('https://example.com/', status_code=401, text='Unauthorized')
+        http.get('https://www.example.com/', status_code=200)
         http.get('https://example.com/robots.txt', status_code=404)
 
         profile = run_probe('https://example.com/')
@@ -160,6 +181,7 @@ class TestCdnDetection:
         stub_tls(TlsResult(handshake_ok=True, tls_version='TLSv1.3'))
         http.get('http://acme.com/', status_code=200)
         http.get('https://acme.com/', status_code=200, text='')
+        http.get('https://www.acme.com/', status_code=200)
         http.get('https://acme.com/robots.txt', status_code=404)
 
         profile = run_probe('https://acme.com/')
@@ -173,6 +195,7 @@ class TestUrlNormalization:
         stub_tls(TlsResult(handshake_ok=True, tls_version='TLSv1.3'))
         http.get('http://example.com/', status_code=200)
         http.get('https://example.com/', status_code=200, text='')
+        http.get('https://www.example.com/', status_code=200)
         http.get('https://example.com/robots.txt', status_code=404)
 
         profile = run_probe('example.com')

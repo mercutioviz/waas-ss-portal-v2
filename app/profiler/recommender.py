@@ -350,6 +350,29 @@ def recommend(profile: SiteProfile) -> dict:
             ),
         })
 
+    # ── Apex ⇄ www redirect direction ──────────────────────────────────
+    aw = profile.apex_www
+    if aw.applicable and aw.verdict == 'warning':
+        advisories.append({
+            'severity': 'warning',
+            'title': f'WARNING - must be changed: {aw.www_host} redirects to {aw.apex}',
+            'body': (
+                f'{aw.www_host} issues an HTTP {aw.www_status} redirect to the apex domain '
+                f'({aw.apex}). WaaS does not support a FQDN → apex redirect — it must be the '
+                f'other way around. Reconfigure the origin so {aw.apex} redirects to '
+                f'{aw.www_host}, and point the WaaS application hostname at {aw.www_host}.'
+            ),
+        })
+    elif aw.applicable and aw.verdict == 'good':
+        advisories.append({
+            'severity': 'info',
+            'title': f'Redirect is good: {aw.apex} → {aw.www_host}',
+            'body': (
+                f'{aw.apex} redirects to {aw.www_host} (HTTP {aw.apex_status}) — this is the '
+                'direction WaaS supports.'
+            ),
+        })
+
     # ── Bot management ─────────────────────────────────────────────────
     for vendor in profile.bot_management:
         advisories.append({
