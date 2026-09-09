@@ -863,3 +863,69 @@ class SiteProfile(db.Model):
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'error_message': self.error_message,
         }
+
+
+class SecurityMetricSnapshot(db.Model):
+    """Point-in-time snapshot of an app's WAF security metrics, captured
+    periodically so the security dashboard can plot a persisted trend line
+    instead of only showing the current live window."""
+    __tablename__ = 'security_metric_snapshots'
+
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('waas_accounts.id', ondelete='CASCADE'),
+                           nullable=False, index=True)
+    app_id = db.Column(db.String(255), nullable=False, index=True)
+    app_name = db.Column(db.String(255), nullable=False)
+    captured_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    quick_range = db.Column(db.String(20), nullable=False)
+    blocked_count = db.Column(db.Integer, default=0)
+    unique_ip_count = db.Column(db.Integer, default=0)
+    unique_rule_count = db.Column(db.Integer, default=0)
+    top_rules_data = db.Column(db.Text, nullable=True)  # JSON: [{key, count}, ...]
+    top_ips_data = db.Column(db.Text, nullable=True)    # JSON: [{key, count}, ...]
+    top_urls_data = db.Column(db.Text, nullable=True)   # JSON: [{key, count}, ...]
+
+    account = db.relationship('WaasAccount', backref=db.backref('security_metric_snapshots', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<SecurityMetricSnapshot {self.id}: {self.app_id} @ {self.captured_at}>'
+
+    @property
+    def top_rules(self):
+        return json.loads(self.top_rules_data) if self.top_rules_data else []
+
+    @top_rules.setter
+    def top_rules(self, value):
+        self.top_rules_data = json.dumps(value) if value is not None else None
+
+    @property
+    def top_ips(self):
+        return json.loads(self.top_ips_data) if self.top_ips_data else []
+
+    @top_ips.setter
+    def top_ips(self, value):
+        self.top_ips_data = json.dumps(value) if value is not None else None
+
+    @property
+    def top_urls(self):
+        return json.loads(self.top_urls_data) if self.top_urls_data else []
+
+    @top_urls.setter
+    def top_urls(self, value):
+        self.top_urls_data = json.dumps(value) if value is not None else None
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'account_id': self.account_id,
+            'app_id': self.app_id,
+            'app_name': self.app_name,
+            'captured_at': self.captured_at.isoformat() if self.captured_at else None,
+            'quick_range': self.quick_range,
+            'blocked_count': self.blocked_count,
+            'unique_ip_count': self.unique_ip_count,
+            'unique_rule_count': self.unique_rule_count,
+            'top_rules': self.top_rules,
+            'top_ips': self.top_ips,
+            'top_urls': self.top_urls,
+        }

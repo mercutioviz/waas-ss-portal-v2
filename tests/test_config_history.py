@@ -32,6 +32,9 @@ class StubClient:
     def update_application_endpoints(self, app_id, payload):
         self.calls.append(('update_application_endpoints', app_id, payload))
 
+    def delete_url_access_rule(self, app_id, rule_name):
+        self.calls.append(('delete_url_access_rule', app_id, rule_name))
+
 
 @pytest.fixture
 def user(app, db):
@@ -199,6 +202,25 @@ class TestRevertSnapshotDispatch:
         assert client_stub.calls == [
             ('update_application_endpoints', 'app-1.example.com', {'https': {'port': 443}})
         ]
+
+    def test_fp_url_allow_create_deletes_the_created_rule(self, app, db, user, account, client_stub):
+        snap = self._snap(
+            db, user, account, resource_type='fp_url_allow_create',
+            payload_before={}, payload_applied={'name': 'fp-allow-r1', 'url_match': '/checkout', 'action_type': 'Allow'},
+        )
+        revert_snapshot(snap, client_stub, user.id)
+        assert client_stub.calls == [
+            ('delete_url_access_rule', 'app-1.example.com', 'fp-allow-r1')
+        ]
+
+    def test_fp_url_allow_create_without_rule_name_raises(self, app, db, user, account, client_stub):
+        snap = self._snap(
+            db, user, account, resource_type='fp_url_allow_create',
+            payload_before={}, payload_applied={'url_match': '/checkout'},
+        )
+        with pytest.raises(ValueError):
+            revert_snapshot(snap, client_stub, user.id)
+        assert client_stub.calls == []
 
     def test_unknown_resource_type_raises(self, app, db, user, account, client_stub):
         snap = self._snap(db, user, account, resource_type='something_else')

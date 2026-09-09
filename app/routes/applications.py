@@ -2,10 +2,15 @@ import copy
 import json
 import logging
 import uuid
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, current_app
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, current_app, session, g
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
-from app.models import WaasAccount, AuditLog, ConfigSnapshot, get_user_accounts, get_account_for_user, can_write
+from app.models import (
+    WaasAccount, AuditLog, ConfigSnapshot, SecurityMetricSnapshot, get_user_accounts,
+    get_account_for_user, can_write,
+)
 from app.waas_client import WaasClient, WaasApiError
 from app.forms import ApplicationCreateForm, CloneApplicationForm
 from app import limiter, socketio
@@ -17,6 +22,8 @@ from app.validation_schemas import (
 )
 from app.security_dashboard import aggregate_waf_logs
 from app.routes.logs import QUICK_RANGES
+from app.fp_scoring import group_waf_logs
+from app.config_advisor import advise, compute_traffic_stats
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +36,32 @@ def get_client_for_account(account_id, min_permission='read'):
     if not account:
         return None, None, None
     return WaasClient.from_account(account), account, perm
+
+
+def _site_profile_signal(account, application):
+    """Best-effort lookup of a completed SiteProfile for this app's hostname,
+    used by config_advisor to avoid flagging clickjacking protection as a gap
+    when the origin already sends X-Frame-Options. Returns None if no
+    matching profile exists — advise() treats that as "unknown," not "bad."
+    """
+    from app.models import SiteProfile
+
+    domains = (application.get('endpoints', {}) or {}).get('domains', []) or []
+    hostnames = {urlparse(d).hostname or d for d in domains if d}
+    if not hostnames:
+        return None
+
+    profiles = (
+        SiteProfile.query
+        .filter_by(account_id=account.id, status=SiteProfile.STATUS_COMPLETE)
+        .order_by(SiteProfile.completed_at.desc())
+        .all()
+    )
+    for p in profiles:
+        if urlparse(p.target_url).hostname in hostnames:
+            security_headers = (p.profile or {}).get('security_headers', {}) or {}
+            return {'x_frame_options_present': security_headers.get('x_frame_options') is not None}
+    return None
 
 
 def _parse_app_list(result):
@@ -47,6 +80,10 @@ def list_applications():
     """List applications — user selects which WaaS account to view."""
     accounts = get_user_accounts(current_user)
     selected_account_id = request.args.get('account_id', type=int)
+    if selected_account_id:
+        session['current_account_id'] = selected_account_id
+    elif g.current_account:
+        selected_account_id = g.current_account.id
     api_version = request.args.get('api_version', 'v4')
 
     applications = []
@@ -384,13 +421,35 @@ def security_config(account_id, app_id):
     except Exception:
         pass
 
+    # Read-only recommendations panel — never blocks the page on failure.
+    recommendations = []
+    try:
+        waf_result = client.get_logs(
+            app_id, quick_range='r_7d', items_per_page=1000,
+            filter_fields={'LogType': [{'condition': 'is', 'value': 'WF'}]},
+        )
+        fp_groups = group_waf_logs(waf_result.get('results', []))
+
+        access_result = client.get_logs(
+            app_id, quick_range='r_7d', items_per_page=1000,
+            filter_fields={'LogType': [{'condition': 'is', 'value': 'TR'}]},
+        )
+        traffic_stats = compute_traffic_stats(access_result.get('results', []))
+
+        site_profile_signal = _site_profile_signal(account, application)
+
+        recommendations = advise(security, fp_groups, traffic_stats, site_profile_signal)
+    except WaasApiError as e:
+        logger.warning('Skipping recommendations for %s: %s', app_id, e)
+
     return render_template(
         'applications/security.html',
         account=account,
         application=application,
         security=security,
         app_id=app_id,
-        security_curl=security_curl
+        security_curl=security_curl,
+        recommendations=recommendations,
     )
 
 
@@ -606,6 +665,49 @@ def security_dashboard_data(account_id, app_id):
     data = aggregate_waf_logs(logs, quick_range, total_from_api=total_from_api)
     data['quick_range'] = quick_range
     return jsonify(data)
+
+
+@bp.route('/<int:account_id>/<app_id>/dashboard/trend')
+@login_required
+def security_dashboard_trend(account_id, app_id):
+    """JSON endpoint: persisted metric-snapshot history for the trend view.
+
+    Backed by SecurityMetricSnapshot rows captured on an hourly schedule
+    (see app/background_tasks.py:capture_security_metrics) — independent of
+    the live/real-time view above, which always queries the WaaS API directly.
+    """
+    client, account, perm = get_client_for_account(account_id)
+    if not client:
+        return jsonify({'error': 'Account not found or inactive.'}), 404
+
+    days = request.args.get('days', 30, type=int)
+    if days not in (30, 60):
+        days = 30
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    snapshots = (
+        SecurityMetricSnapshot.query
+        .filter(
+            SecurityMetricSnapshot.account_id == account.id,
+            SecurityMetricSnapshot.app_id == app_id,
+            SecurityMetricSnapshot.captured_at >= cutoff,
+        )
+        .order_by(SecurityMetricSnapshot.captured_at.asc())
+        .all()
+    )
+
+    return jsonify({
+        'days': days,
+        'points': [
+            {
+                'captured_at': s.captured_at.isoformat(),
+                'blocked_count': s.blocked_count,
+                'unique_ip_count': s.unique_ip_count,
+                'unique_rule_count': s.unique_rule_count,
+            }
+            for s in snapshots
+        ],
+    })
 
 
 # ---- Phase 8: Configuration Editing & Bulk Operations ----

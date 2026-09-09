@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, session
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
 from datetime import datetime
@@ -19,6 +19,26 @@ def list_accounts():
     owned = [a for a in accounts if a._permission == 'owner']
     shared = [a for a in accounts if a._permission != 'owner']
     return render_template('accounts/list.html', accounts=owned, shared_accounts=shared)
+
+
+@bp.route('/switch', methods=['POST'])
+@login_required
+def switch_account():
+    """Set the persistent current-account scope. Used by the navbar switcher
+    and the command palette; every account-scoped page reads g.current_account
+    as its default once this is set."""
+    account_id = request.form.get('account_id', type=int)
+    if account_id:
+        account, perm = get_account_for_user(account_id, current_user)
+        if account:
+            session['current_account_id'] = account.id
+        else:
+            flash(_('Account not found or access denied.'), 'danger')
+
+    next_url = request.form.get('next', '')
+    if not (next_url.startswith('/') and not next_url.startswith('//')):
+        next_url = url_for('main.dashboard')
+    return redirect(next_url)
 
 
 @bp.route('/add', methods=['GET', 'POST'])

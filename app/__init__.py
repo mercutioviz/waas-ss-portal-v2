@@ -1,6 +1,6 @@
 import os
 import logging
-from flask import Flask, render_template, request, session
+from flask import Flask, render_template, request, session, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_login import LoginManager, current_user
@@ -170,6 +170,43 @@ def create_app(config_name='default'):
         """Make get_theme available to all templates"""
         return {'get_theme': get_theme}
 
+    # Resolve the persistent "current account" scope for this request.
+    # Session holds the id; we re-validate ownership/active status every
+    # request so a stale or foreign id never leaks access to another account.
+    @app.before_request
+    def resolve_current_account():
+        g.current_account = None
+        if request.endpoint == 'static':
+            return
+        if not (current_user and getattr(current_user, 'is_authenticated', False)):
+            return
+        from app.models import get_account_for_user, get_user_accounts
+        account_id = session.get('current_account_id')
+        account = None
+        if account_id:
+            account, _perm = get_account_for_user(account_id, current_user)
+            if not account:
+                session.pop('current_account_id', None)
+        if not account:
+            accounts = get_user_accounts(current_user)
+            if len(accounts) == 1:
+                account = accounts[0]
+                session['current_account_id'] = account.id
+        g.current_account = account
+
+    # Context processor to expose the current account to all templates
+    @app.context_processor
+    def inject_current_account():
+        return {'current_account': getattr(g, 'current_account', None)}
+
+    # Context processor to expose the account list for the navbar switcher
+    @app.context_processor
+    def inject_switchable_accounts():
+        if current_user and getattr(current_user, 'is_authenticated', False):
+            from app.models import get_user_accounts
+            return {'switchable_accounts': get_user_accounts(current_user)}
+        return {'switchable_accounts': []}
+
     # Context processor to inject unread notification count
     @app.context_processor
     def inject_notification_count():
@@ -186,7 +223,7 @@ def create_app(config_name='default'):
         return {'csrf_token': generate_csrf}
 
     # Register blueprints
-    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features, profiler, config_history
+    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features, profiler, config_history, search, review
     from app.routes import help as help_bp
     app.register_blueprint(main.bp)
     app.register_blueprint(auth.bp)
@@ -203,6 +240,8 @@ def create_app(config_name='default'):
     app.register_blueprint(help_bp.bp)
     app.register_blueprint(profiler.bp)
     app.register_blueprint(config_history.bp)
+    app.register_blueprint(search.bp)
+    app.register_blueprint(review.bp)
 
     # Register SocketIO event handlers
     from app import socketio_events  # noqa: F401
@@ -265,7 +304,9 @@ def create_app(config_name='default'):
     # Start scheduler (avoid double-start in debug reloader; skip under pytest)
     if (not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true') \
             and not app.config.get('TESTING'):
-        from app.background_tasks import run_site_profile_cleanup
+        from app.background_tasks import (
+            run_site_profile_cleanup, capture_security_metrics, run_security_metric_cleanup,
+        )
         from app.report_service import run_scheduled_reports
 
         scheduler.init_app(app)
@@ -277,6 +318,14 @@ def create_app(config_name='default'):
         @scheduler.task('cron', id='cleanup_site_profiles', hour=3, minute=17, misfire_grace_time=3600)
         def _cleanup_site_profiles_job():
             run_site_profile_cleanup(app)
+
+        @scheduler.task('interval', id='capture_security_metrics', hours=1, misfire_grace_time=600)
+        def _capture_security_metrics_job():
+            capture_security_metrics(app)
+
+        @scheduler.task('cron', id='cleanup_security_metrics', hour=3, minute=37, misfire_grace_time=3600)
+        def _cleanup_security_metrics_job():
+            run_security_metric_cleanup(app)
 
         scheduler.start()
 

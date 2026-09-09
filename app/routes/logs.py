@@ -9,11 +9,12 @@ import csv
 import io
 import json
 from math import ceil
-from flask import Blueprint, render_template, request, flash, redirect, url_for, make_response, Response, stream_with_context
+from flask import Blueprint, render_template, request, flash, redirect, url_for, make_response, Response, stream_with_context, session, g
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
-from app.models import WaasAccount, AuditLog, get_user_accounts, get_account_for_user
+from app.models import WaasAccount, AuditLog, ConfigSnapshot, get_user_accounts, get_account_for_user, can_write
 from app.waas_client import WaasClient, WaasApiError
+from app.fp_scoring import group_waf_logs
 
 bp = Blueprint('logs', __name__, url_prefix='/logs')
 
@@ -185,6 +186,10 @@ def index():
     accounts = get_user_accounts(current_user)
 
     account_id = request.args.get('account_id', type=int)
+    if account_id:
+        session['current_account_id'] = account_id
+    elif g.current_account:
+        account_id = g.current_account.id
     selected_account = None
     applications = []
 
@@ -418,6 +423,8 @@ def fp_analysis(account_id, app_name):
     account = _get_account(account_id)
 
     quick_range = request.args.get('quick_range', 'r_7d')
+    sort_by = request.args.get('sort', 'count')
+    min_confidence = request.args.get('min_confidence', 0, type=int) or 0
 
     logs = []
     total_from_api = 0
@@ -440,53 +447,15 @@ def fp_analysis(account_id, app_name):
     except WaasApiError as e:
         error = str(e)
 
-    # Group by AttackType + RuleID
-    attack_groups = {}
-    for entry in logs:
-        attack_type = entry.get('AttackType', entry.get('Attack', 'Unknown'))
-        rule_id = entry.get('RuleID', 'unknown')
-        group_key = f'{attack_type}|{rule_id}'
+    # Group by AttackType + RuleID and score each group
+    attack_groups = group_waf_logs(logs)
 
-        if group_key not in attack_groups:
-            attack_groups[group_key] = {
-                'attack_type': attack_type,
-                'attack_name': entry.get('Attack', attack_type),
-                'attack_group': entry.get('AttackGroup', '—'),
-                'rule_id': rule_id,
-                'rule_type': entry.get('RuleType', '—'),
-                'owasp': entry.get('owasp', '—'),
-                'cwe': entry.get('cwe', '—'),
-                'owasp_api': entry.get('owasp_api_top_ten', '—'),
-                'owasp_risk_score': entry.get('owasp_risk_score', '—'),
-                'count': 0,
-                'deny_count': 0,
-                'log_count': 0,
-                'samples': [],
-                'unique_ips': set(),
-                'unique_urls': set(),
-            }
+    # Sort by count (default) or FP confidence descending
+    sort_key = (lambda g: g['fp_confidence']) if sort_by == 'fp_confidence' else (lambda g: g['count'])
+    sorted_groups = sorted(attack_groups, key=sort_key, reverse=True)
 
-        group = attack_groups[group_key]
-        group['count'] += 1
-        action = entry.get('Action', '')
-        if action == 'DENY':
-            group['deny_count'] += 1
-        else:
-            group['log_count'] += 1
-        if len(group['samples']) < 5:
-            group['samples'].append(entry)
-        group['unique_ips'].add(entry.get('ClientIP', 'unknown'))
-        group['unique_urls'].add(entry.get('URL', 'unknown'))
-
-    # Convert sets to counts for template serialisation
-    for group in attack_groups.values():
-        group['unique_ip_count'] = len(group['unique_ips'])
-        group['unique_url_count'] = len(group['unique_urls'])
-        del group['unique_ips']
-        del group['unique_urls']
-
-    # Sort by count descending
-    sorted_groups = sorted(attack_groups.values(), key=lambda g: g['count'], reverse=True)
+    if min_confidence:
+        sorted_groups = [g for g in sorted_groups if g['fp_confidence'] >= min_confidence]
 
     total_deny = sum(1 for e in logs if e.get('Action') == 'DENY')
     total_log = sum(1 for e in logs if e.get('Action') != 'DENY')
@@ -502,5 +471,64 @@ def fp_analysis(account_id, app_name):
         total_log=total_log,
         quick_range=quick_range,
         quick_ranges=QUICK_RANGES,
+        sort_by=sort_by,
+        min_confidence=min_confidence,
         error=error,
     )
+
+
+@bp.route('/<int:account_id>/<path:app_name>/fp-allow-rule', methods=['POST'])
+@login_required
+def create_fp_allow_rule(account_id, app_name):
+    """Create a URL allow rule from a high-FP-confidence group (Phase 5 FP workaround).
+
+    This allow-lists the URL *path* broadly — it is not a true per-rule
+    exception, since the WaaS API has no rule-ID-aware exception endpoint.
+    """
+    account, perm = get_account_for_user(account_id, current_user, min_permission='write')
+    if not account or not can_write(perm):
+        flash(_('Account not found or insufficient permissions.'), 'danger')
+        return redirect(url_for('logs.fp_analysis', account_id=account_id, app_name=app_name))
+
+    rule_name = (request.form.get('rule_name') or '').strip()
+    url_match = (request.form.get('url_match') or '').strip()
+    if not rule_name or not url_match:
+        flash(_('Rule name and URL are required.'), 'danger')
+        return redirect(url_for('logs.fp_analysis', account_id=account_id, app_name=app_name))
+
+    data = {'name': rule_name, 'url_match': url_match, 'action_type': 'Allow'}
+
+    try:
+        client = WaasClient.from_account(account)
+        client.create_url_access_rule(app_name, data)
+    except WaasApiError as e:
+        flash(_('Failed to create URL allow rule: %(error)s', error=str(e)), 'danger')
+        return redirect(url_for('logs.fp_analysis', account_id=account_id, app_name=app_name))
+
+    ConfigSnapshot.record(
+        user_id=current_user.id,
+        account_id=account.id,
+        app_id=app_name,
+        app_name=app_name,
+        resource_type='fp_url_allow_create',
+        resource_label=f'URL allow rule: {rule_name}',
+        payload_before={},
+        payload_applied=data,
+    )
+
+    AuditLog.log(
+        user_id=current_user.id,
+        action='fp_url_allow_create',
+        resource_type='application',
+        resource_id=app_name,
+        details=f'Created URL allow rule "{rule_name}" ({url_match}) for app {app_name} on '
+                f'account {account.account_name} from FP analysis',
+        ip_address=request.remote_addr,
+    )
+
+    flash(
+        _('Created URL allow rule "%(name)s". This allow-lists the URL path broadly — '
+          'it is not a rule-specific exception.', name=rule_name),
+        'success'
+    )
+    return redirect(url_for('logs.fp_analysis', account_id=account_id, app_name=app_name))

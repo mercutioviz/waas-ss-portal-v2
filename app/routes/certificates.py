@@ -1,5 +1,5 @@
 from datetime import date
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, session, g
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
 from app.models import WaasAccount, AuditLog, get_user_accounts, get_account_for_user, can_write
@@ -17,6 +17,10 @@ def list_certificates():
     """List certificates — user selects which WaaS account to view."""
     accounts = get_user_accounts(current_user)
     selected_account_id = request.args.get('account_id', type=int)
+    if selected_account_id:
+        session['current_account_id'] = selected_account_id
+    elif g.current_account:
+        selected_account_id = g.current_account.id
 
     certificates = []
     selected_account = None

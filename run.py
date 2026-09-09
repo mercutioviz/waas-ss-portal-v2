@@ -57,6 +57,22 @@ def cleanup_site_profiles():
     print(f'Deleted {deleted} site profile(s) older than the retention window.')
 
 
+@app.cli.command('run-security-metrics')
+def run_security_metrics():
+    """Capture a security metric snapshot for every active account/app immediately."""
+    from app.background_tasks import capture_security_metrics
+    captured = capture_security_metrics(app)
+    print(f'Captured {captured} security metric snapshot(s).')
+
+
+@app.cli.command('cleanup-security-metrics')
+def cleanup_security_metrics():
+    """Delete security metric snapshots older than the retention window immediately."""
+    from app.background_tasks import run_security_metric_cleanup
+    deleted = run_security_metric_cleanup(app)
+    print(f'Deleted {deleted} security metric snapshot(s) older than the retention window.')
+
+
 @app.cli.command('seed')
 def seed():
     """Initialize DB and create admin user (convenience command)."""

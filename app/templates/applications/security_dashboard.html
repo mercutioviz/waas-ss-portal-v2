@@ -127,6 +127,27 @@
     </div>
 </div>
 
+<!-- Historical trend (persisted snapshots) -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-clock-history"></i> {{ _('Historical Trend') }}</h6>
+        <div class="btn-group btn-group-sm" id="history-range-selector">
+            <button type="button" class="btn btn-outline-secondary active" data-days="30">{{ _('30d') }}</button>
+            <button type="button" class="btn btn-outline-secondary" data-days="60">{{ _('60d') }}</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">{{ _('Hourly snapshots captured in the background, independent of the live view above — builds up over time.') }}</p>
+        <div style="position: relative; height: 220px;" id="history-chart-wrap">
+            <canvas id="historyChart"></canvas>
+        </div>
+        <div id="history-empty" class="text-center py-4 text-muted d-none">
+            <i class="bi bi-hourglass-split display-6"></i>
+            <p class="mt-2 mb-0">{{ _('No history yet — snapshots accumulate hourly starting now.') }}</p>
+        </div>
+    </div>
+</div>
+
 <!-- Top-N lists -->
 <div class="row g-4">
     <div class="col-md-4">
@@ -330,6 +351,70 @@ document.addEventListener('DOMContentLoaded', function() {
             load(btn.dataset.range);
         });
     });
+
+    var trendUrl = '{{ url_for("applications.security_dashboard_trend", account_id=account.id, app_id=app_id) }}';
+    var historyChart = null;
+
+    function renderHistoryChart(points) {
+        var wrap = document.getElementById('history-chart-wrap');
+        var empty = document.getElementById('history-empty');
+        if (historyChart) historyChart.destroy();
+        if (!points.length) {
+            wrap.classList.add('d-none');
+            empty.classList.remove('d-none');
+            return;
+        }
+        wrap.classList.remove('d-none');
+        empty.classList.add('d-none');
+        var ctx = document.getElementById('historyChart').getContext('2d');
+        historyChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: points.map(function(p) { return new Date(p.captured_at).toLocaleString(); }),
+                datasets: [{
+                    label: '{{ _("Blocked events") }}',
+                    data: points.map(function(p) { return p.blocked_count; }),
+                    borderColor: accent,
+                    backgroundColor: accentWash,
+                    fill: true,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { maxRotation: 45, maxTicksLimit: 12 } },
+                    y: { beginAtZero: true, ticks: { precision: 0 } }
+                }
+            }
+        });
+    }
+
+    function loadHistory(days) {
+        fetch(trendUrl + '?days=' + days)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) { throw new Error(data.error); }
+                renderHistoryChart(data.points || []);
+            })
+            .catch(function(err) {
+                console.error('Security dashboard history error:', err);
+            });
+    }
+
+    document.querySelectorAll('#history-range-selector button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelector('#history-range-selector .active').classList.remove('active');
+            btn.classList.add('active');
+            loadHistory(btn.dataset.days);
+        });
+    });
+
+    loadHistory(30);
 
     document.getElementById('toggle-table-view').addEventListener('click', function() {
         var chartWrap = document.getElementById('trend-chart-wrap');

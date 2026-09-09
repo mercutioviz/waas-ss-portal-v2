@@ -161,6 +161,42 @@
     </div>
 </div>
 {% endif %}
+
+<!-- Compare to Live App -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-arrow-left-right"></i> {{ _('Compare to Live App') }}</h5>
+    </div>
+    <div class="card-body">
+        {% if accounts %}
+        <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-5">
+                <label for="compareAccount" class="form-label">{{ _('Account') }}</label>
+                <select class="form-select" id="compareAccount">
+                    <option value="">{{ _('Select account...') }}</option>
+                    {% for acct in accounts %}
+                    <option value="{{ acct.id }}">{{ acct.account_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-5">
+                <label for="compareApp" class="form-label">{{ _('Application') }}</label>
+                <select class="form-select" id="compareApp" disabled>
+                    <option value="">{{ _('Select account first...') }}</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <a href="#" class="btn btn-outline-primary w-100 disabled" id="compareBtn" tabindex="-1" aria-disabled="true">
+                    <i class="bi bi-arrow-left-right"></i> {{ _('Compare') }}
+                </a>
+            </div>
+        </div>
+        <p class="text-muted small mt-2 mb-0">{{ _('Shows a field-by-field diff between this template and the selected application\'s current security config — nothing is changed.') }}</p>
+        {% else %}
+        <p class="text-muted mb-0">{{ _('No active WaaS accounts found.') }} <a href="{{ url_for('accounts.add_account') }}">{{ _('Add an account') }}</a> {{ _('first.') }}</p>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}
 
 {# Diff Preview Modal #}
@@ -201,6 +237,56 @@ window.TEMPLATE_CONFIG = {{ template.config_dict|tojson }};
     const applyBtn = document.getElementById('applyBtn');
     const previewBtn = document.getElementById('previewBtn');
     const form = document.getElementById('quickApplyForm');
+
+    const compareAccountSelect = document.getElementById('compareAccount');
+    const compareAppSelect = document.getElementById('compareApp');
+    const compareBtn = document.getElementById('compareBtn');
+
+    if (compareAccountSelect) {
+        compareAccountSelect.addEventListener('change', function() {
+            const accountId = this.value;
+            compareAppSelect.innerHTML = '<option value="">{{ _('Loading...') }}</option>';
+            compareAppSelect.disabled = true;
+            compareBtn.classList.add('disabled');
+            compareBtn.setAttribute('aria-disabled', 'true');
+
+            if (!accountId) {
+                compareAppSelect.innerHTML = '<option value="">{{ _('Select account first...') }}</option>';
+                return;
+            }
+
+            fetch('{{ url_for("applications.api_list_applications") }}?account_id=' + accountId)
+                .then(r => r.json())
+                .then(data => {
+                    compareAppSelect.innerHTML = '<option value="">{{ _('Select application...') }}</option>';
+                    (data.applications || []).forEach(function(app) {
+                        const opt = document.createElement('option');
+                        opt.value = app.name;
+                        opt.textContent = app.name + (app.app_group ? ' (' + app.app_group + ')' : '');
+                        compareAppSelect.appendChild(opt);
+                    });
+                    compareAppSelect.disabled = false;
+                })
+                .catch(() => {
+                    compareAppSelect.innerHTML = '<option value="">{{ _('Failed to load apps') }}</option>';
+                });
+        });
+
+        compareAppSelect.addEventListener('change', function() {
+            var accountId = compareAccountSelect.value;
+            var appId = this.value;
+            if (accountId && appId) {
+                compareBtn.href = '{{ url_for("templates.compare_baseline", template_id=template.id, account_id=0, app_id="__APP__") }}'
+                    .replace('/0/', '/' + accountId + '/')
+                    .replace('__APP__', encodeURIComponent(appId));
+                compareBtn.classList.remove('disabled');
+                compareBtn.setAttribute('aria-disabled', 'false');
+            } else {
+                compareBtn.classList.add('disabled');
+                compareBtn.setAttribute('aria-disabled', 'true');
+            }
+        });
+    }
 
     if (!accountSelect) return;
 

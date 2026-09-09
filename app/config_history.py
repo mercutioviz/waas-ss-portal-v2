@@ -53,6 +53,14 @@ def revert_snapshot(snapshot, client, user_id):
     elif snapshot.resource_type == 'endpoint_update':
         client.update_application_endpoints(app_id, payload_before)
 
+    elif snapshot.resource_type == 'fp_url_allow_create':
+        # Additive action — nothing to replay. "Revert" means deleting the
+        # rule this snapshot recorded the creation of.
+        rule_name = (snapshot.payload_applied_dict or {}).get('name')
+        if not rule_name:
+            raise ValueError('Snapshot has no recorded rule name — cannot revert.')
+        client.delete_url_access_rule(app_id, rule_name)
+
     else:
         raise ValueError(f'Unknown resource_type "{snapshot.resource_type}" — cannot revert.')
 

@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Review') }} — {{ app_id }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb" class="mt-3 d-print-none">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">{{ _('Dashboard') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('review.index') }}">{{ _('Review') }}</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('review.index', account_id=account.id) }}">{{ account.account_name }}</a></li>
+        <li class="breadcrumb-item active">{{ app_id }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3 d-print-none">
+    <h2><i class="bi bi-clipboard2-data"></i> {{ _('Account/Config Review') }}</h2>
+    <div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+            <i class="bi bi-printer"></i> {{ _('Print') }}
+        </button>
+        <a href="{{ url_for('review.index', account_id=account.id) }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> {{ _('Back') }}
+        </a>
+    </div>
+</div>
+
+<div class="mb-4">
+    <span class="text-muted">{{ _('Account:') }}</span> <strong>{{ account.account_name }}</strong>
+    <span class="text-muted ms-3">{{ _('Application:') }}</span> <strong>{{ app_id }}</strong>
+</div>
+
+{% if error %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    {{ _('Some data could not be loaded: %(error)s. The report below may be incomplete.', error=error) }}
+</div>
+{% endif %}
+
+{# Baseline template picker #}
+<div class="card mb-4 d-print-none">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label form-label-sm mb-0">{{ _('Baseline Template') }}</label>
+                <select name="template_id" class="form-select form-select-sm">
+                    <option value="">{{ _('Most recently applied (auto)') }}</option>
+                    {% for t in templates %}
+                    <option value="{{ t.id }}" {% if selected_template and t.id == selected_template.id %}selected{% endif %}>{{ t.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label form-label-sm mb-0">{{ _('Log Window') }}</label>
+                <select name="quick_range" class="form-select form-select-sm">
+                    {% for val, label in quick_ranges %}
+                    <option value="{{ val }}" {% if val == quick_range %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">{{ _('Compare') }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# Config Summary #}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-shield-check"></i> {{ _('Current Security Config') }}</h5></div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-4">
+                <span class="text-muted">{{ _('Protection Mode') }}:</span>
+                {% set mode = review.config_summary.protection_mode %}
+                <span class="badge {% if mode == 'Active' %}bg-success{% elif mode == 'Passive' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                    {{ mode | default(_('Unknown'), true) }}
+                </span>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted">{{ _('Clickjacking Protection') }}:</span>
+                <span class="badge {{ 'bg-success' if review.config_summary.clickjacking_enabled else 'bg-secondary' }}">
+                    {{ _('Enabled') if review.config_summary.clickjacking_enabled else _('Disabled') }}
+                </span>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted">{{ _('Data Theft Protection') }}:</span>
+                <span class="badge {{ 'bg-success' if review.config_summary.data_theft_enabled else 'bg-secondary' }}">
+                    {{ _('Enabled') if review.config_summary.data_theft_enabled else _('Disabled') }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Recommendations (Phase 2) #}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-lightbulb"></i> {{ _('Recommendations') }}</h5></div>
+    <div class="card-body p-0">
+        {% if review.recommendations %}
+        <table class="table table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>{{ _('Field') }}</th>
+                    <th>{{ _('Current') }}</th>
+                    <th>{{ _('Suggested') }}</th>
+                    <th>{{ _('Rationale') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in review.recommendations %}
+                <tr class="{% if rec.severity == 'warning' %}table-warning{% else %}table-info{% endif %}">
+                    <td><code>{{ rec.field }}</code></td>
+                    <td>{{ rec.current_value }}</td>
+                    <td>{{ rec.suggested_value }}</td>
+                    <td><small>{{ rec.rationale }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center text-muted py-3"><i class="bi bi-check-circle text-success"></i> {{ _('No recommendations — config looks reasonable given observed traffic.') }}</div>
+        {% endif %}
+    </div>
+</div>
+
+{# FP/FN Scoring (Phase 1) #}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-search"></i> {{ _('False Positive / Gap Analysis') }} <small class="text-muted">({% for val, label in quick_ranges %}{% if val == quick_range %}{{ label }}{% endif %}{% endfor %})</small></h5></div>
+    <div class="card-body">
+        <div class="row mb-3 text-center">
+            <div class="col-3">
+                <h4 class="mb-0">{{ review.fp_summary.total_groups }}</h4>
+                <small class="text-muted">{{ _('Attack Groups') }}</small>
+            </div>
+            <div class="col-3">
+                <h4 class="mb-0 text-warning">{{ review.fp_summary.likely_fp_count }}</h4>
+                <small class="text-muted">{{ _('Likely FP') }}</small>
+            </div>
+            <div class="col-3">
+                <h4 class="mb-0 text-info">{{ review.fp_summary.possible_fp_count }}</h4>
+                <small class="text-muted">{{ _('Possible FP') }}</small>
+            </div>
+            <div class="col-3">
+                <h4 class="mb-0 text-danger">{{ review.fp_summary.possible_gap_count }}</h4>
+                <small class="text-muted">{{ _('Possible Gaps') }}</small>
+            </div>
+        </div>
+        {% if review.fp_summary.top_gaps %}
+        <h6>{{ _('Possible Coverage Gaps') }}</h6>
+        <ul class="list-unstyled mb-0">
+            {% for g in review.fp_summary.top_gaps %}
+            <li><i class="bi bi-shield-exclamation text-danger"></i> <strong>{{ g.attack_name }}</strong> — {{ g.count }} {{ _('events') }}, {{ g.fn_reasons|default([])|join('; ') }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="mt-2">
+            <a href="{{ url_for('logs.fp_analysis', account_id=account.id, app_name=app_id) }}" class="d-print-none">{{ _('Full FP analysis') }} &rarr;</a>
+        </div>
+    </div>
+</div>
+
+{# Trend (Phase 3) #}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-graph-up"></i> {{ _('Security Trend') }}</h5></div>
+    <div class="card-body">
+        {% if review.trend_summary %}
+        <div class="row text-center">
+            <div class="col-4">
+                <h4 class="mb-0">{{ review.trend_summary.sample_count }}</h4>
+                <small class="text-muted">{{ _('Snapshots') }}</small>
+            </div>
+            <div class="col-4">
+                <h4 class="mb-0">{{ review.trend_summary.latest_blocked_count }}</h4>
+                <small class="text-muted">{{ _('Latest Blocked Count') }}</small>
+            </div>
+            <div class="col-4">
+                <h4 class="mb-0 {% if review.trend_summary.blocked_count_delta > 0 %}text-danger{% elif review.trend_summary.blocked_count_delta < 0 %}text-success{% endif %}">
+                    {{ '%+d' % review.trend_summary.blocked_count_delta }}
+                </h4>
+                <small class="text-muted">{{ _('Change since %(date)s', date=review.trend_summary.first_captured_at) }}</small>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-2">{{ _('No trend history yet — snapshots accumulate over time via the scheduled metrics job.') }}</div>
+        {% endif %}
+    </div>
+</div>
+
+{# Baseline comparison (Phase 4) #}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-journal-check"></i> {{ _('Baseline Comparison') }}</h5></div>
+    <div class="card-body">
+        {% if review.baseline_summary %}
+        <p class="text-muted mb-2">{{ _('Compared against: %(name)s', name=review.baseline_summary.name) }} — {{ review.baseline_summary.gap_count }} {{ _('difference(s)') }}</p>
+        {% if review.baseline_summary.gaps %}
+        <table class="table table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>{{ _('Field') }}</th>
+                    <th>{{ _('Live') }}</th>
+                    <th>{{ _('Baseline') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gap in review.baseline_summary.gaps %}
+                <tr class="table-warning">
+                    <td><code>{{ gap.field }}</code></td>
+                    <td>{{ gap.live_value }}</td>
+                    <td>{{ gap.baseline_value }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-success"><i class="bi bi-check-circle"></i> {{ _('No differences from baseline.') }}</div>
+        {% endif %}
+        {% else %}
+        <div class="text-center text-muted py-2">{{ _('No baseline template selected or applied for this application.') }}</div>
+        {% endif %}
+    </div>
+</div>
+
+{# Config History (recent snapshots) #}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-clock-history"></i> {{ _('Recent Config History') }}</h5></div>
+    <div class="card-body p-0">
+        {% if review.history_summary.recent %}
+        <table class="table table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>{{ _('When') }}</th>
+                    <th>{{ _('Type') }}</th>
+                    <th>{{ _('Label') }}</th>
+                    <th>{{ _('Reverted') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for snap in review.history_summary.recent %}
+                <tr>
+                    <td><small>{{ snap.created_at|datetime_format }}</small></td>
+                    <td><code>{{ snap.resource_type }}</code></td>
+                    <td>{{ snap.resource_label|null_dash }}</td>
+                    <td>{% if snap.is_reverted %}<span class="badge bg-secondary">{{ _('Reverted') }}</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center text-muted py-3">{{ _('No recorded config changes for this application yet.') }}</div>
+        {% endif %}
+    </div>
+    <div class="card-footer d-print-none">
+        <a href="{{ url_for('config_history.list_snapshots', account_id=account.id, app_id=app_id) }}">{{ _('Full config history') }} &rarr;</a>
+    </div>
+</div>
+
+{% endblock %}

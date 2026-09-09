@@ -373,6 +373,45 @@ def apply_template(template_id, account_id, app_id):
     return redirect(url_for('applications.view_application', account_id=account_id, app_id=app_id))
 
 
+@bp.route('/<int:template_id>/compare/<int:account_id>/<app_id>')
+@login_required
+def compare_baseline(template_id, account_id, app_id):
+    """Diff a live application's security config against a template baseline.
+
+    Reuses applications/compare.html — that template only depends on
+    account/app_names/configs and is already dict-shape-agnostic, so no
+    duplicate diff logic is needed here.
+    """
+    template = get_template_or_404(template_id)
+    if not template:
+        flash(_('Template not found or access denied.'), 'danger')
+        return redirect(url_for('templates.list_templates'))
+
+    client, account = get_client_for_account(account_id)
+    if not client:
+        flash(_('Account not found or inactive.'), 'danger')
+        return redirect(url_for('templates.view_template', template_id=template_id))
+
+    try:
+        live_config = client.get_security_config(app_id)
+    except WaasApiError as e:
+        flash(_('Failed to load config for "%(app_id)s": %(error)s', app_id=app_id, error=str(e)), 'danger')
+        return redirect(url_for('templates.view_template', template_id=template_id))
+
+    baseline_label = _('Template: %(name)s', name=template.name)
+    app_names = [app_id, baseline_label]
+    configs = {app_id: live_config, baseline_label: template.config_dict}
+
+    return render_template(
+        'applications/compare.html',
+        account=account,
+        app_names=app_names,
+        configs=configs,
+        is_baseline=True,
+        back_url=url_for('templates.view_template', template_id=template_id)
+    )
+
+
 @bp.route('/<int:template_id>/bulk-apply', methods=['GET', 'POST'])
 @login_required
 @limiter.limit("5 per minute", methods=["POST"])

@@ -12,10 +12,12 @@
 {% endblock %}
 
 {% block content %}
+{% set back_url = back_url if back_url is defined else url_for('applications.list_applications', account_id=account.id) %}
+{% set icon2 = 'bi-journal-check' if is_baseline is defined and is_baseline else 'bi-globe' %}
 <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center mt-4 mb-4 gap-2">
     <h2><i class="bi bi-arrow-left-right"></i> {{ _('Compare Applications') }}</h2>
-    <a href="{{ url_for('applications.list_applications', account_id=account.id) }}" class="btn btn-secondary btn-sm">
-        <i class="bi bi-arrow-left"></i> {{ _('Back to Applications') }}
+    <a href="{{ back_url }}" class="btn btn-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> {{ _('Back') }}
     </a>
 </div>
 
@@ -35,7 +37,7 @@
     <div class="col-md-6">
         <div class="card border-success">
             <div class="card-body text-center py-2">
-                <h5 class="mb-0 text-success"><i class="bi bi-globe"></i> {{ app_names[1] }}</h5>
+                <h5 class="mb-0 text-success"><i class="bi {{ icon2 }}"></i> {{ app_names[1] }}</h5>
             </div>
         </div>
     </div>

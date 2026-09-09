@@ -70,7 +70,7 @@
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle {% if ep.startswith('logs.') or ep.startswith('reports.') or ep.startswith('config_history.') %}active{% endif %}"
+                        <a class="nav-link dropdown-toggle {% if ep.startswith('logs.') or ep.startswith('reports.') or ep.startswith('config_history.') or ep.startswith('review.') %}active{% endif %}"
                            href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-bar-chart"></i> {{ _('Observability') }}
                         </a>
@@ -78,6 +78,7 @@
                             <li><a class="dropdown-item {% if ep.startswith('logs.') %}active{% endif %}" href="{{ url_for('logs.index') }}"><i class="bi bi-journal-text"></i> {{ _('Logs') }}</a></li>
                             <li><a class="dropdown-item {% if ep.startswith('reports.') %}active{% endif %}" href="{{ url_for('reports.list_reports') }}"><i class="bi bi-calendar-check"></i> {{ _('Reports') }}</a></li>
                             <li><a class="dropdown-item {% if ep.startswith('config_history.') %}active{% endif %}" href="{{ url_for('config_history.list_snapshots') }}"><i class="bi bi-clock-history"></i> {{ _('Config History') }}</a></li>
+                            <li><a class="dropdown-item {% if ep.startswith('review.') %}active{% endif %}" href="{{ url_for('review.index') }}"><i class="bi bi-clipboard2-data"></i> {{ _('Account/Config Review') }}</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -105,6 +106,34 @@
                     {% endif %}
                 </ul>
                 <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <button class="btn nav-link" id="paletteTrigger" title="{{ _('Search') }} (Ctrl+K)" aria-label="{{ _('Search') }}" type="button">
+                            <i class="bi bi-search"></i>
+                        </button>
+                    </li>
+                    {% if switchable_accounts %}
+                    <li class="nav-item dropdown" id="accountSwitcher">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-building"></i>
+                            {% if current_account %}<strong>{{ current_account.account_name }}</strong>{% else %}{{ _('Select account') }}{% endif %}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:220px;max-height:400px;overflow-y:auto;">
+                            <li class="dropdown-header">{{ _('Account scope') }}</li>
+                            {% for acct in switchable_accounts %}
+                            <li>
+                                <form method="post" action="{{ url_for('accounts.switch_account') }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="account_id" value="{{ acct.id }}">
+                                    <input type="hidden" name="next" value="{{ request.path }}">
+                                    <button type="submit" class="dropdown-item {% if current_account and acct.id == current_account.id %}active{% endif %}">
+                                        {{ acct.account_name }}
+                                    </button>
+                                </form>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </li>
+                    {% endif %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="bi bi-translate"></i> {% if get_locale() == 'es' %}ES{% else %}EN{% endif %}
@@ -293,6 +322,52 @@
         </div>
     </div>
 
+    {% if current_user.is_authenticated %}
+    <!-- Command Palette -->
+    <div class="command-palette-backdrop d-none" id="commandPalette">
+        <div class="command-palette-box">
+            <div class="command-palette-input-wrap">
+                <i class="bi bi-search"></i>
+                <input type="text" id="commandPaletteInput" class="command-palette-input"
+                       placeholder="{{ _('Search apps, accounts, templates...') }}" autocomplete="off">
+                <kbd class="command-palette-esc">Esc</kbd>
+            </div>
+            <div class="command-palette-results" id="commandPaletteResults"></div>
+        </div>
+    </div>
+    <form method="post" action="{{ url_for('accounts.switch_account') }}" id="paletteSwitchAccountForm" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="account_id" id="paletteSwitchAccountId">
+        <input type="hidden" name="next" value="{{ request.path }}">
+    </form>
+    <script>
+    window.paletteSearchUrl = {{ url_for('search.search_api')|tojson }};
+    window.paletteStaticCommands = [
+        {title: {{ _('Dashboard')|tojson }}, url: {{ url_for('main.dashboard')|tojson }}, icon: 'speedometer2'},
+        {title: {{ _('New site profile')|tojson }}, url: {{ url_for('profiler.new_profile')|tojson }}, icon: 'compass'},
+        {title: {{ _('Profiler history')|tojson }}, url: {{ url_for('profiler.list_profiles')|tojson }}, icon: 'clock-history'},
+        {title: {{ _('Accounts')|tojson }}, url: {{ url_for('accounts.list_accounts')|tojson }}, icon: 'key'},
+        {title: {{ _('Applications')|tojson }}, url: {{ url_for('applications.list_applications')|tojson }}, icon: 'globe'},
+        {title: {{ _('Certificates')|tojson }}, url: {{ url_for('certificates.list_certificates')|tojson }}, icon: 'file-earmark-lock'},
+        {title: {{ _('Config Transformer')|tojson }}, url: {{ url_for('applications.config_transformer')|tojson }}, icon: 'sliders'},
+        {title: {{ _('Templates')|tojson }}, url: {{ url_for('templates.list_templates')|tojson }}, icon: 'file-earmark-code'},
+        {title: {{ _('Raw Configs')|tojson }}, url: {{ url_for('features.list_features')|tojson }}, icon: 'braces'},
+        {title: {{ _('Logs')|tojson }}, url: {{ url_for('logs.index')|tojson }}, icon: 'journal-text'},
+        {title: {{ _('Reports')|tojson }}, url: {{ url_for('reports.list_reports')|tojson }}, icon: 'calendar-check'},
+        {title: {{ _('Config History')|tojson }}, url: {{ url_for('config_history.list_snapshots')|tojson }}, icon: 'clock-history'},
+        {title: {{ _('Account/Config Review')|tojson }}, url: {{ url_for('review.index')|tojson }}, icon: 'clipboard2-data'},
+        {title: {{ _('Help Center')|tojson }}, url: {{ url_for('help.index')|tojson }}, icon: 'question-circle'},
+        {title: {{ _('Profile')|tojson }}, url: {{ url_for('auth.profile')|tojson }}, icon: 'person'},
+        {title: {{ _('Change password')|tojson }}, url: {{ url_for('auth.change_password')|tojson }}, icon: 'lock'}
+        {% if current_user.role == 'admin' %}
+        ,{title: {{ _('Admin dashboard')|tojson }}, url: {{ url_for('admin.index')|tojson }}, icon: 'speedometer'}
+        ,{title: {{ _('Users')|tojson }}, url: {{ url_for('admin.list_users')|tojson }}, icon: 'people'}
+        ,{title: {{ _('Audit log')|tojson }}, url: {{ url_for('admin.audit_log')|tojson }}, icon: 'clipboard-data'}
+        {% endif %}
+    ];
+    </script>
+    {% endif %}
+
     <script>
     window.i18n = {
         showing_x_of_y: {{ _('Showing %(visible)s of %(total)s', visible='%(visible)s', total='%(total)s')|tojson }}
@@ -300,6 +375,9 @@
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% if current_user.is_authenticated %}
+    <script src="{{ url_for('static', filename='js/command-palette.js') }}"></script>
+    {% endif %}
     {% if current_user.is_authenticated %}
     <script>
     (function(){

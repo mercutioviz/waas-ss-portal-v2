@@ -5,11 +5,13 @@ import traceback
 from datetime import datetime, timedelta
 
 from app import db, socketio
-from app.waas_client import WaasApiError
+from app.waas_client import WaasClient, WaasApiError
 
 logger = logging.getLogger(__name__)
 
 SITE_PROFILE_RETENTION_DAYS = 30
+SECURITY_METRIC_RETENTION_DAYS = 90
+SECURITY_METRIC_QUICK_RANGE = 'r_1h'
 
 
 def run_bulk_operation(session_id, items, operation_func, name='Bulk operation'):
@@ -268,4 +270,102 @@ def run_site_profile_cleanup(app) -> int:
         db.session.commit()
         logger.info(f'Site profile cleanup: deleted {deleted} row(s) older than '
                     f'{SITE_PROFILE_RETENTION_DAYS} days.')
+        return deleted
+
+
+def _parse_app_list(result):
+    """Normalise a list_applications() response into a plain Python list.
+
+    Duplicated (not imported) from app.routes.applications, matching the
+    existing convention of each call site keeping its own small copy
+    (see app/routes/features.py, app/routes/templates.py).
+    """
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        apps = result.get('results', result.get('data', result.get('applications', [])))
+        return apps if isinstance(apps, list) else [result]
+    return []
+
+
+def capture_security_metrics(app) -> int:
+    """Snapshot per-app WAF security metrics for trend history.
+
+    Iterates every active WaasAccount (system-wide, not scoped to a portal
+    user) and every application under it, reusing the existing get_logs() +
+    aggregate_waf_logs() aggregation — no duplicate metric logic.
+
+    Runs on an hourly APScheduler job (see app/__init__.py) and is also
+    exposed as `flask run-security-metrics` for manual invocation.
+    """
+    from app.models import WaasAccount, SecurityMetricSnapshot
+    from app.security_dashboard import aggregate_waf_logs
+
+    captured = 0
+
+    with app.app_context():
+        accounts = WaasAccount.query.filter_by(is_active=True).all()
+        for account in accounts:
+            try:
+                client = WaasClient.from_account(account)
+                apps = _parse_app_list(client.list_applications())
+            except WaasApiError as e:
+                logger.warning(f'Security metric capture: failed to list apps for account {account.id}: {e}')
+                continue
+
+            for app_entry in apps:
+                app_id = app_entry.get('name')
+                if not app_id:
+                    continue
+                try:
+                    result = client.get_logs(
+                        app_id,
+                        quick_range=SECURITY_METRIC_QUICK_RANGE,
+                        items_per_page=1000,
+                        filter_fields={'LogType': [{'condition': 'is', 'value': 'WF'}]},
+                    )
+                except WaasApiError as e:
+                    logger.warning(f'Security metric capture: failed to fetch logs for '
+                                   f'account {account.id}/{app_id}: {e}')
+                    continue
+
+                logs = result.get('results', []) if isinstance(result, dict) else []
+                total_from_api = result.get('count', len(logs)) if isinstance(result, dict) else len(logs)
+                data = aggregate_waf_logs(logs, SECURITY_METRIC_QUICK_RANGE, total_from_api=total_from_api)
+
+                snapshot = SecurityMetricSnapshot(
+                    account_id=account.id,
+                    app_id=app_id,
+                    app_name=app_entry.get('name', app_id),
+                    quick_range=SECURITY_METRIC_QUICK_RANGE,
+                    blocked_count=data['blocked_count'],
+                    unique_ip_count=data['unique_ip_count'],
+                    unique_rule_count=data['unique_rule_count'],
+                )
+                snapshot.top_rules = data['top_rules']
+                snapshot.top_ips = data['top_ips']
+                snapshot.top_urls = data['top_urls']
+                db.session.add(snapshot)
+                captured += 1
+
+        db.session.commit()
+        logger.info(f'Security metric capture: recorded {captured} snapshot(s).')
+        return captured
+
+
+def run_security_metric_cleanup(app) -> int:
+    """Delete SecurityMetricSnapshot rows older than SECURITY_METRIC_RETENTION_DAYS.
+
+    Runs on a daily APScheduler cron job (see app/__init__.py) and is also
+    exposed as `flask cleanup-security-metrics` for manual invocation.
+    """
+    from app.models import SecurityMetricSnapshot
+
+    with app.app_context():
+        cutoff = datetime.utcnow() - timedelta(days=SECURITY_METRIC_RETENTION_DAYS)
+        deleted = SecurityMetricSnapshot.query.filter(SecurityMetricSnapshot.captured_at < cutoff) \
+            .delete(synchronize_session=False)
+        db.session.commit()
+        logger.info(f'Security metric cleanup: deleted {deleted} row(s) older than '
+                    f'{SECURITY_METRIC_RETENTION_DAYS} days.')
         return deleted

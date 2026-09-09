@@ -27,6 +27,7 @@ RESOURCE_TYPE_LABELS = {
     'bulk_security_update': 'Bulk Security Update',
     'server_update': 'Server Update',
     'endpoint_update': 'Endpoint Update',
+    'fp_url_allow_create': 'FP URL Allow Rule',
 }
 
 RESOURCE_TYPE_BADGES = {
@@ -38,6 +39,7 @@ RESOURCE_TYPE_BADGES = {
     'bulk_security_update': 'bg-warning text-dark',
     'server_update': 'bg-secondary',
     'endpoint_update': 'bg-secondary',
+    'fp_url_allow_create': 'bg-success',
 }
 
 

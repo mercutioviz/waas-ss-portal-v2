@@ -36,6 +36,33 @@
 
 {% set user_can_write = current_user.role != 'viewer' %}
 
+{% if recommendations %}
+<div class="card mb-4 border-primary">
+    <div class="card-header bg-primary-subtle">
+        <h5 class="mb-0"><i class="bi bi-lightbulb"></i> {{ _('Recommendations') }}
+            <small class="text-muted fw-normal">{{ _('based on the last 7 days of traffic') }}</small>
+        </h5>
+    </div>
+    <div class="list-group list-group-flush">
+        {% for rec in recommendations %}
+        <div class="list-group-item">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <span class="badge {% if rec.severity == 'warning' %}bg-warning text-dark{% else %}bg-info{% endif %} me-2">
+                        {{ rec.field }}
+                    </span>
+                    <span class="text-muted">{{ rec.current_value }}</span>
+                    <i class="bi bi-arrow-right mx-1"></i>
+                    <strong>{{ rec.suggested_value }}</strong>
+                </div>
+            </div>
+            <p class="mb-0 mt-1 small text-muted">{{ rec.rationale }}</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 {% if security %}
 <div class="row g-4">
     {# Protection Mode #}
