@@ -122,6 +122,10 @@
             if (data.third_party_hosts) summary += ' · ' + data.third_party_hosts + ' ' + {{ _("3rd-party hosts")|tojson }};
             return summary;
         }
+        if (stepKey === 'cache_analysis') {
+            if (!data.assets_total) return data.has_cache_control ? {{ _("page only")|tojson }} : {{ _("none set")|tojson }};
+            return data.assets_cacheable + '/' + data.assets_total + ' ' + {{ _("assets cacheable")|tojson }};
+        }
         if (stepKey === 'tech' && data.tech_stack) return data.tech_stack.length ? data.tech_stack.join(', ') : {{ _("none detected")|tojson }};
         if (stepKey === 'dns_security') {
             var flags = [];

@@ -29,6 +29,7 @@ import requests
 import tldextract
 from bs4 import BeautifulSoup
 
+from app.profiler.cache_analysis import parse_cache_control
 from app.profiler.schemas import SubresourceHit, SubresourceReport
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,11 @@ def _fetch_one(url: str, kind: str, primary_domain_key: tuple[str, str]) -> Subr
                 hit.bytes_estimate = int(clen)
             except ValueError:
                 pass
+        hit.cache_control = r.headers.get('Cache-Control')
+        hit.etag = 'ETag' in r.headers
+        cc = parse_cache_control(hit.cache_control)
+        if cc:
+            hit.max_age = cc['max_age']
     except requests.exceptions.RequestException as e:
         hit.error = str(e)[:200]
     hit.elapsed_ms = int((time.monotonic() - started) * 1000)

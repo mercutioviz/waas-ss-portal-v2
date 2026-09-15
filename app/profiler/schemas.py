@@ -84,6 +84,9 @@ class SubresourceHit:
     elapsed_ms: Optional[int] = None
     third_party: bool = False
     error: Optional[str] = None
+    cache_control: Optional[str] = None          # raw Cache-Control value, if any
+    etag: bool = False                           # ETag present?
+    max_age: Optional[int] = None                # parsed from Cache-Control max-age, if present
 
 
 @dataclass
@@ -107,6 +110,41 @@ class TechDetection:
     category: str = ''
     source: str = ''                             # 'header' | 'cookie' | 'body' | 'subresource'
     version: Optional[str] = None
+
+
+@dataclass
+class CachePageReport:
+    """Cache-policy signals parsed from the landing-page response headers."""
+    cache_control: Optional[dict] = None        # parsed directives; see cache_analysis.parse_cache_control
+    etag: bool = False
+    last_modified: bool = False
+    vary: Optional[str] = None
+    age: Optional[int] = None
+    edge_hit: bool = False                       # X-Cache/CF-Cache-Status/X-Cache-Hits indicates a HIT
+
+
+@dataclass
+class AssetCacheSummary:
+    """Aggregate cache-policy view across analyzed static-asset subresources.
+
+    Each analyzed asset falls into exactly one bucket, in priority order:
+    no_store > cacheable > revalidate_only > missing_validators.
+    """
+    analyzed: int = 0
+    cacheable: int = 0
+    no_store: int = 0
+    missing_validators: int = 0
+    revalidate_only: int = 0                            # ETag present but no explicit lifetime
+    long_lived: int = 0
+    examples: list[str] = field(default_factory=list)  # up to 5 URLs with no cache headers at all
+    revalidate_examples: list[str] = field(default_factory=list)  # up to 5 revalidate-only URLs
+
+
+@dataclass
+class CacheAnalysisReport:
+    """Combined page + static-asset cache-policy view."""
+    page: CachePageReport = field(default_factory=CachePageReport)
+    assets: AssetCacheSummary = field(default_factory=AssetCacheSummary)
 
 
 @dataclass
@@ -171,6 +209,7 @@ class SiteProfile:
     dns_security: DnsSecurityReport = field(default_factory=DnsSecurityReport)
     bot_management: list[BotVendor] = field(default_factory=list)
     apex_www: ApexWwwCheck = field(default_factory=ApexWwwCheck)
+    cache_analysis: CacheAnalysisReport = field(default_factory=CacheAnalysisReport)
 
     def to_dict(self) -> dict:
         return asdict(self)

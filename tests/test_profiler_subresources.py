@@ -1,10 +1,14 @@
 """Tests for subresources.discover — HTML → absolute URL list.
 
 fetch_all is left to end-to-end verification because it involves network
-concurrency; the discover pass is where the regression risk lives.
+concurrency; the discover pass is where the regression risk lives. _fetch_one
+is covered directly below via requests_mock since it's a single synchronous
+call — that's where cache-header capture lives.
 """
 
-from app.profiler.subresources import discover
+import requests_mock
+
+from app.profiler.subresources import _fetch_one, discover
 
 
 BASE = 'https://acme.example.com/'
@@ -80,3 +84,23 @@ class TestDiscoverEdgeCases:
     def test_empty_html(self):
         assert discover('', BASE) == []
         assert discover(None, BASE) == []
+
+
+class TestFetchOneCacheHeaders:
+    def test_captures_cache_control_and_etag(self):
+        with requests_mock.Mocker() as m:
+            m.head(BASE + 'app.js', status_code=200, headers={
+                'Cache-Control': 'public, max-age=3600', 'ETag': '"abc"',
+            })
+            hit = _fetch_one(BASE + 'app.js', 'script', ('acme', 'example.com'))
+        assert hit.cache_control == 'public, max-age=3600'
+        assert hit.etag is True
+        assert hit.max_age == 3600
+
+    def test_absent_cache_headers_leave_fields_unset(self):
+        with requests_mock.Mocker() as m:
+            m.head(BASE + 'app.js', status_code=200)
+            hit = _fetch_one(BASE + 'app.js', 'script', ('acme', 'example.com'))
+        assert hit.cache_control is None
+        assert hit.etag is False
+        assert hit.max_age is None

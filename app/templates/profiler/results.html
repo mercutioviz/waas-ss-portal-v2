@@ -67,6 +67,9 @@
 {% set dns_sec = probe.get('dns_security', {}) %}
 {% set bots = probe.get('bot_management', []) %}
 {% set aw = probe.get('apex_www', {}) %}
+{% set cache = probe.get('cache_analysis', {}) %}
+{% set cache_page = cache.get('page', {}) %}
+{% set cache_assets = cache.get('assets', {}) %}
 
 <div class="mt-4 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
@@ -282,6 +285,95 @@
     {% endfor %}
     {% endcall %}
     {% endif %}
+
+    {# ── Caching ── #}
+    {% call card('caching', _('Caching'), 'lightning-charge') %}
+    {% set cache_rows = [
+        ('Cache-Control', cache_page.get('cache_control')),
+        ('ETag', cache_page.get('etag')),
+        ('Last-Modified', cache_page.get('last_modified')),
+        ('Vary', cache_page.get('vary')),
+        ('Age', cache_page.get('age')),
+    ] %}
+    <div class="text-uppercase text-muted small fw-semibold mb-1">{{ _('Landing page') }}</div>
+    <table class="table table-sm mb-3">
+        <thead>
+            <tr><th>{{ _('Header') }}</th><th>{{ _('Status') }}</th></tr>
+        </thead>
+        <tbody>
+            {% for name, val in cache_rows %}
+            <tr>
+                <td><code>{{ name }}</code></td>
+                <td>
+                    {% if val is none or val is false %}
+                        <span class="text-muted">— {{ _('not set') }}</span>
+                    {% elif val is mapping %}
+                        <span class="text-success">✓</span>
+                        {{ val.raw }}
+                    {% elif val is true %}
+                        <span class="text-success">✓ {{ _('present') }}</span>
+                    {% else %}
+                        <span class="text-success">✓</span> <code>{{ val }}</code>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            <tr>
+                <td><code>{{ _('Edge cache hit') }}</code></td>
+                <td>
+                    {% if cache_page.get('edge_hit') %}
+                        <span class="text-success">✓ {{ _('yes') }}</span>
+                    {% else %}
+                        <span class="text-muted">— {{ _('no / unknown') }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    {% if cache_assets.get('analyzed') %}
+    <div class="text-uppercase text-muted small fw-semibold mb-1">{{ _('Static assets') }}</div>
+    <div class="row g-3">
+        <div class="col-6 col-md-2">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-5 fw-semibold">{{ cache_assets.analyzed }}</div>
+                <div class="text-muted small">{{ _('analyzed') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-5 fw-semibold">{{ cache_assets.cacheable }}</div>
+                <div class="text-muted small">{{ _('cacheable') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-5 fw-semibold">{{ cache_assets.no_store }}</div>
+                <div class="text-muted small">{{ _('no-store') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-5 fw-semibold">{{ cache_assets.revalidate_only }}</div>
+                <div class="text-muted small">{{ _('revalidate only') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-5 fw-semibold">{{ cache_assets.missing_validators }}</div>
+                <div class="text-muted small">{{ _('missing validators') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="border rounded p-2 text-center">
+                <div class="fs-5 fw-semibold">{{ cache_assets.long_lived }}</div>
+                <div class="text-muted small">{{ _('long-lived (≥1d)') }}</div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">{{ _('No static assets were analyzed for caching.') }}</p>
+    {% endif %}
+    {% endcall %}
 
     {# ── Security headers ── #}
     {% call card('sec_headers', _('Security headers'), 'shield-lock') %}

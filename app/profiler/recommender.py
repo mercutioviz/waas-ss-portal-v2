@@ -396,6 +396,61 @@ def recommend(profile: SiteProfile) -> dict:
             ),
         })
 
+    # ── Caching ─────────────────────────────────────────────────────────
+    assets = profile.cache_analysis.assets
+    if assets.analyzed > 0:
+        problem_count = assets.no_store + assets.missing_validators
+        if problem_count > 0:
+            severity = 'warning' if problem_count > assets.analyzed / 2 else 'info'
+            advisories.append({
+                'severity': severity,
+                'title': f'{problem_count} of {assets.analyzed} static asset(s) served without cache headers',
+                'body': (
+                    'Scripts, styles, images, and fonts with no `Cache-Control` and no `ETag` '
+                    'force browsers to re-fetch them in full on every visit, adding avoidable '
+                    'origin load.'
+                    + (' Examples: ' + ', '.join(assets.examples) + '.' if assets.examples else '')
+                ),
+            })
+        if assets.revalidate_only > 0:
+            advisories.append({
+                'severity': 'info',
+                'title': f'{assets.revalidate_only} of {assets.analyzed} static asset(s) rely on revalidation only',
+                'body': (
+                    'These assets send an `ETag` but no explicit lifetime (`Cache-Control: max-age` '
+                    'or `public`), so the browser must send a conditional request on every load to '
+                    'check for a 304 instead of skipping the network entirely. Adding a long '
+                    '`max-age` alongside the existing `ETag` would let repeat visitors avoid the '
+                    'round trip.'
+                    + (' Examples: ' + ', '.join(assets.revalidate_examples) + '.' if assets.revalidate_examples else '')
+                ),
+            })
+        if problem_count == 0 and assets.revalidate_only == 0 and assets.cacheable / assets.analyzed >= 0.8:
+            advisories.append({
+                'severity': 'info',
+                'title': 'Static assets are well cached',
+                'body': (
+                    f'{assets.cacheable} of {assets.analyzed} static assets already send usable '
+                    'cache directives — good baseline for the WAF to build on.'
+                ),
+            })
+
+    cdn_caching_vendor = profile.cdn or next(
+        (t.name for t in profile.tech_stack if t.category == 'Caching'), None,
+    )
+    page_cc = profile.cache_analysis.page.cache_control
+    if cdn_caching_vendor and page_cc and page_cc.get('no_store'):
+        advisories.append({
+            'severity': 'info',
+            'title': f'{cdn_caching_vendor} detected, but the origin sends no-store',
+            'body': (
+                f'A {cdn_caching_vendor} edge cache is in front of this site, but the landing '
+                'page response includes `Cache-Control: no-store`, so the edge is likely passing '
+                'every request straight through. Worth confirming before planning capacity under '
+                'the new WAF.'
+            ),
+        })
+
     # ── Tech-specific tuning nudges ────────────────────────────────────
     if 'WordPress' in profile.tech_names:
         advisories.append({

@@ -5,6 +5,9 @@ import pytest
 from app.profiler.recommender import ALLOWED_FORM_FIELDS, recommend
 from app.profiler.schemas import (
     ApexWwwCheck,
+    AssetCacheSummary,
+    CacheAnalysisReport,
+    CachePageReport,
     CookieAnalysis,
     DnsResult,
     DnsSecurityReport,
@@ -60,6 +63,7 @@ def _profile(
     dns_security=None,
     bot_management=None,
     apex_www=None,
+    cache_analysis=None,
 ):
     if target_url is None:
         target_url = f'https://{hostname}/'
@@ -90,6 +94,7 @@ def _profile(
         dns_security=dns_security if dns_security is not None else _clean_dns_security(),
         bot_management=list(bot_management) if bot_management is not None else [],
         apex_www=apex_www if apex_www is not None else ApexWwwCheck(),
+        cache_analysis=cache_analysis if cache_analysis is not None else CacheAnalysisReport(),
     )
 
 
@@ -160,6 +165,76 @@ class TestAdvisories:
         result = recommend(_profile())
         severities = [a['severity'] for a in result['advisories']]
         assert 'warning' not in severities
+
+
+class TestCachingAdvisories:
+    def test_clean_profile_has_no_caching_advisory(self):
+        result = recommend(_profile())
+        titles = [a['title'] for a in result['advisories']]
+        assert not any('cache' in t.lower() or 'no-store' in t.lower() for t in titles)
+
+    def test_missing_cache_headers_flagged_as_warning_when_majority(self):
+        cache = CacheAnalysisReport(
+            assets=AssetCacheSummary(
+                analyzed=4, cacheable=1, no_store=1, missing_validators=3,
+                examples=['https://acme.example.com/app.js'],
+            ),
+        )
+        result = recommend(_profile(cache_analysis=cache))
+        adv = [a for a in result['advisories'] if 'static asset' in a['title']]
+        assert adv, 'expected a static-asset caching advisory'
+        assert adv[0]['severity'] == 'warning'
+        assert 'app.js' in adv[0]['body']
+
+    def test_missing_cache_headers_flagged_as_info_when_minority(self):
+        cache = CacheAnalysisReport(
+            assets=AssetCacheSummary(analyzed=10, cacheable=9, no_store=0, missing_validators=1),
+        )
+        result = recommend(_profile(cache_analysis=cache))
+        adv = [a for a in result['advisories'] if 'static asset' in a['title']]
+        assert adv and adv[0]['severity'] == 'info'
+
+    def test_well_cached_confirmation_when_no_problems(self):
+        cache = CacheAnalysisReport(
+            assets=AssetCacheSummary(analyzed=10, cacheable=9, no_store=0, missing_validators=0),
+        )
+        result = recommend(_profile(cache_analysis=cache))
+        titles = [a['title'] for a in result['advisories']]
+        assert 'Static assets are well cached' in titles
+
+    def test_revalidate_only_flagged(self):
+        cache = CacheAnalysisReport(
+            assets=AssetCacheSummary(
+                analyzed=12, cacheable=0, no_store=0, missing_validators=0, revalidate_only=12,
+                revalidate_examples=['https://acme.example.com/logo.png'],
+            ),
+        )
+        result = recommend(_profile(cache_analysis=cache))
+        adv = [a for a in result['advisories'] if 'revalidation only' in a['title']]
+        assert adv, 'expected a revalidate-only caching advisory'
+        assert adv[0]['severity'] == 'info'
+        assert 'logo.png' in adv[0]['body']
+
+    def test_revalidate_only_suppresses_well_cached_confirmation(self):
+        cache = CacheAnalysisReport(
+            assets=AssetCacheSummary(analyzed=10, cacheable=8, no_store=0, missing_validators=0, revalidate_only=2),
+        )
+        result = recommend(_profile(cache_analysis=cache))
+        titles = [a['title'] for a in result['advisories']]
+        assert 'Static assets are well cached' not in titles
+
+    def test_cdn_with_no_store_origin_flagged(self):
+        cache = CacheAnalysisReport(page=CachePageReport(cache_control={'no_store': True}))
+        result = recommend(_profile(cdn='Cloudflare', cache_analysis=cache))
+        adv = [a for a in result['advisories'] if 'no-store' in a['title'].lower()]
+        assert adv, 'expected a CDN/no-store mismatch advisory'
+        assert 'Cloudflare' in adv[0]['title']
+
+    def test_no_cdn_no_mismatch_advisory(self):
+        cache = CacheAnalysisReport(page=CachePageReport(cache_control={'no_store': True}))
+        result = recommend(_profile(cache_analysis=cache))
+        adv = [a for a in result['advisories'] if 'no-store' in a['title'].lower()]
+        assert not adv
 
 
 class TestAllowlistValidation:

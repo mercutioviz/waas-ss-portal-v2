@@ -28,6 +28,7 @@ import requests
 from app.profiler import (
     apex_www,
     bot_mgmt,
+    cache_analysis,
     cookie_analysis,
     dns_security,
     fingerprints,
@@ -35,6 +36,7 @@ from app.profiler import (
     subresources as subresources_mod,
 )
 from app.profiler.schemas import (
+    CacheAnalysisReport,
     DnsResult,
     HttpResult,
     ProbeStep,
@@ -60,6 +62,7 @@ PROBE_STEPS: list[ProbeStep] = [
     ProbeStep('security_headers', 'Auditing security headers'),
     ProbeStep('cookies', 'Analyzing cookies'),
     ProbeStep('subresources', 'Discovering subresources'),
+    ProbeStep('cache_analysis', 'Analyzing cache headers'),
     ProbeStep('tech', 'Fingerprinting stack'),
     ProbeStep('dns_security', 'Checking DNS security records'),
     ProbeStep('bot_mgmt', 'Detecting bot management'),
@@ -366,6 +369,18 @@ def run_probe(target_url: str, emit: Optional[EmitCallback] = None) -> SiteProfi
         })
     else:
         emit('subresources', 'skip', {'error': 'time budget exceeded'})
+
+    # 8b. Cache analysis (landing-page headers + static-asset headers from step 8)
+    emit('cache_analysis', 'start')
+    profile.cache_analysis = CacheAnalysisReport(
+        page=cache_analysis.analyze(profile.https_root.headers),
+        assets=cache_analysis.summarize_assets(profile.subresources.hits),
+    )
+    emit('cache_analysis', 'ok', {
+        'has_cache_control': bool(profile.cache_analysis.page.cache_control),
+        'assets_cacheable': profile.cache_analysis.assets.cacheable,
+        'assets_total': profile.cache_analysis.assets.analyzed,
+    })
 
     # 9. Tech fingerprint (headers + cookies + body + subresource URLs)
     emit('tech', 'start')
