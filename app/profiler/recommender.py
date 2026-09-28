@@ -451,6 +451,77 @@ def recommend(profile: SiteProfile) -> dict:
             ),
         })
 
+    # ── robots.txt ─────────────────────────────────────────────────────
+    robots = profile.robots
+    if not robots.present:
+        advisories.append({
+            'severity': 'info',
+            'title': 'No robots.txt found',
+            'body': (
+                'The site does not publish a robots.txt'
+                + (' (the response was not a text file — a catch-all route may be answering '
+                   'for it).' if robots.fetch_reason == 'not_text' else '.')
+                + ' Nothing to act on for the WAF; noted only because it also means no '
+                'crawler directives will carry over to the new endpoint.'
+            ),
+        })
+    else:
+        if robots.sensitive_paths:
+            shown = ', '.join(robots.sensitive_paths[:8])
+            more = len(robots.sensitive_paths) - 8
+            advisories.append({
+                'severity': 'warning',
+                'title': f'robots.txt discloses {len(robots.sensitive_paths)} sensitive path(s)',
+                'body': (
+                    'robots.txt is world-readable, so these `Disallow` entries advertise admin '
+                    'and internal surface to anyone who looks: '
+                    + shown + (f', and {more} more' if more > 0 else '') + '. '
+                    'Crawlers honor the file voluntarily; attackers read it as a site map. '
+                    'Once the app is created, restrict these paths with URL access rules '
+                    '(by source IP or geography) rather than relying on robots.txt to hide them.'
+                ),
+            })
+
+        if robots.disallows_everything:
+            advisories.append({
+                'severity': 'warning',
+                'title': 'robots.txt blocks all crawlers from the entire site',
+                'body': (
+                    'The `*` user-agent group contains `Disallow: /`, which asks every crawler '
+                    'to skip the whole site — usually a leftover from a staging deployment. '
+                    'Worth confirming this is intentional before the site moves behind the WAF.'
+                ),
+            })
+
+        if robots.wildcard_crawl_delay is not None:
+            bot_note = ''
+            if profile.bot_management:
+                vendors = ', '.join(b.name for b in profile.bot_management)
+                bot_note = (
+                    f' You are also running {vendors}, so crawler pressure is already being '
+                    'managed in two places — worth consolidating.'
+                )
+            advisories.append({
+                'severity': 'info',
+                'title': f'robots.txt requests a crawl delay of {robots.wildcard_crawl_delay:g}s',
+                'body': (
+                    'A `Crawl-delay` suggests the origin has struggled with crawler load. '
+                    'Well-behaved bots honor it; the rest ignore it. WaaS bot rules or request '
+                    'limits can enforce what the file only requests.' + bot_note
+                ),
+            })
+
+        if robots.sitemaps:
+            advisories.append({
+                'severity': 'info',
+                'title': f'{len(robots.sitemaps)} sitemap(s) declared in robots.txt',
+                'body': (
+                    'Useful during rollout: ' + ', '.join(robots.sitemaps[:5])
+                    + '. A sitemap is a ready-made list of URLs to spot-check once traffic '
+                    'is flowing through the WAF.'
+                ),
+            })
+
     # ── Tech-specific tuning nudges ────────────────────────────────────
     if 'WordPress' in profile.tech_names:
         advisories.append({

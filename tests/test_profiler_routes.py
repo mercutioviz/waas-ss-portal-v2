@@ -334,6 +334,19 @@ class TestResults:
             'dns_security': {'spf': 'v=spf1 -all', 'dmarc': 'v=DMARC1; p=reject',
                              'caa': ['0 issue "letsencrypt.org"'], 'mx_present': True},
             'bot_management': [{'name': 'reCAPTCHA', 'evidence': 'www.google.com'}],
+            'robots_txt': 'User-agent: *\nDisallow: /wp-admin/\nSitemap: https://acme.example.com/sitemap.xml\n',
+            'robots': {
+                'present': True, 'fetch_status': 200, 'fetch_reason': None,
+                'groups': [{'user_agents': ['*'], 'disallow': ['/wp-admin/', '/feed/'],
+                            'allow': [], 'crawl_delay': 10.0}],
+                'sitemaps': ['https://acme.example.com/sitemap.xml'],
+                'unknown_directives': ['request-rate'],
+                'sensitive_paths': ['/wp-admin/'],
+                'disallows_everything': False,
+                'wildcard_crawl_delay': 10.0,
+                'total_disallow_count': 2,
+                'truncated': False,
+            },
         }
 
     def test_renders_prefilled_form(self, logged_in_client, account, db):
@@ -384,6 +397,40 @@ class TestResults:
         assert b'DMARC' in resp.data
         # Bot management surfaces vendor name
         assert b'reCAPTCHA' in resp.data
+        # robots.txt card: rules, the sensitive-path callout, and the sitemap
+        assert b'robots.txt' in resp.data
+        assert b'/wp-admin/' in resp.data
+        assert b'Sensitive paths disclosed publicly' in resp.data
+        assert b'sitemap.xml' in resp.data
+        assert b'request-rate' in resp.data
+
+    def test_results_render_for_profiles_stored_before_the_robots_check(
+        self, logged_in_client, account, db,
+    ):
+        """Older rows have no 'robots' key at all — the card must fall back to
+        its empty state rather than erroring."""
+        probe = self._sample_probe()
+        del probe['robots']
+        del probe['robots_txt']
+        row = self._make_row(
+            account, db, recommendation=self._sample_recommendation(), probe=probe,
+        )
+        resp = logged_in_client.get(f'/profiler/{row.id}/results')
+        assert resp.status_code == 200
+        assert b'does not publish a robots.txt' in resp.data
+
+    def test_robots_card_explains_a_catch_all_response(
+        self, logged_in_client, account, db,
+    ):
+        probe = self._sample_probe()
+        probe['robots'] = {'present': False, 'fetch_reason': 'not_text', 'fetch_status': 200}
+        probe.pop('robots_txt', None)
+        row = self._make_row(
+            account, db, recommendation=self._sample_recommendation(), probe=probe,
+        )
+        resp = logged_in_client.get(f'/profiler/{row.id}/results')
+        assert resp.status_code == 200
+        assert b'catch-all route is likely answering' in resp.data
 
     def test_empty_field_prompts_are_visible(self, logged_in_client, account, db):
         rec = self._sample_recommendation()

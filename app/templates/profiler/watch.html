@@ -135,7 +135,13 @@
             return flags.length ? flags.join(' · ') : {{ _("none set")|tojson }};
         }
         if (stepKey === 'bot_mgmt' && data.vendors) return data.vendors.length ? data.vendors.join(', ') : {{ _("none detected")|tojson }};
-        if (stepKey === 'robots') return data.has_robots ? {{ _("present")|tojson }} : {{ _("not found")|tojson }};
+        if (stepKey === 'robots') {
+            if (!data.has_robots) return {{ _("not found")|tojson }};
+            var robotsBits = [data.disallow_count + ' ' + {{ _("disallow rules")|tojson }}];
+            if (data.sensitive_count) robotsBits.push(data.sensitive_count + ' ' + {{ _("sensitive")|tojson }});
+            if (data.sitemap_count) robotsBits.push(data.sitemap_count + ' ' + {{ _("sitemaps")|tojson }});
+            return robotsBits.join(' · ');
+        }
         if (stepKey === 'auth_surface' && data.signals) return data.signals.length ? data.signals.join('; ') : {{ _("public")|tojson }};
         if (stepKey === 'cdn') return data.cdn || {{ _("none")|tojson }};
         return '';

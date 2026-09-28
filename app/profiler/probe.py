@@ -32,6 +32,7 @@ from app.profiler import (
     cookie_analysis,
     dns_security,
     fingerprints,
+    robots as robots_mod,
     security_headers,
     subresources as subresources_mod,
 )
@@ -50,6 +51,17 @@ USER_AGENT = 'WaaS-Portal-Probe/2.0 (+https://v2.ssportal.waaslab.com/profiler)'
 GLOBAL_BUDGET_SECONDS = 25
 REQUEST_TIMEOUT_SECONDS = 8
 MAX_BODY_BYTES = 200_000
+
+# How much of robots.txt we keep verbatim for the results card. Parsing always
+# runs over the full fetched body — this cap only bounds what we store.
+ROBOTS_RAW_DISPLAY_CHARS = 4096
+
+# Content types that are definitely not robots.txt. Sites with a catch-all
+# route (SPAs especially) answer /robots.txt with 200 + their index page.
+NON_ROBOTS_CONTENT_TYPES = (
+    'text/html', 'application/xhtml', 'application/json',
+    'application/xml', 'text/xml',
+)
 
 # Step ordering surfaced to the UI. `key` values are also the event step_key.
 PROBE_STEPS: list[ProbeStep] = [
@@ -178,6 +190,7 @@ def _http_get(url: str, timeout: float, allow_redirects: bool = False) -> HttpRe
         )
         result.status = r.status_code
         result.headers = dict(r.headers)
+        result.final_url = r.url
         result.cookies = {c.name: c.value for c in r.cookies}
         # `r.headers` collapses duplicate Set-Cookie into one comma-joined
         # string; urllib3's underlying HTTPHeaderDict keeps them separate.
@@ -214,6 +227,40 @@ def _looks_like_login(body: str) -> bool:
         return False
     lower = body.lower()
     return 'type="password"' in lower or "type='password'" in lower
+
+
+def _is_robots_body(headers: dict, body: str) -> bool:
+    """True if this response plausibly IS a robots.txt.
+
+    Lenient on a missing Content-Type — plenty of real servers send robots.txt
+    without one, and rejecting those would lose genuine files. We only reject
+    when the server explicitly declares a non-text type, or when the body
+    opens with markup (the SPA catch-all case, which often declares nothing).
+    """
+    content_type = ''
+    for k, v in (headers or {}).items():
+        if k.lower() == 'content-type':
+            content_type = (v or '').lower()
+            break
+    if any(ct in content_type for ct in NON_ROBOTS_CONTENT_TYPES):
+        return False
+    return not body.lstrip().startswith('<')
+
+
+def _robots_origin(profile: SiteProfile, fallback_origin: str) -> str:
+    """Base origin to fetch robots.txt from.
+
+    robots.txt is per-origin, so it belongs to wherever the landing page
+    actually ended up — following an apex → www redirect means the apex
+    robots.txt is the wrong one to read. Falls back to the target's own origin
+    when the landing page never came back (e.g. HTTPS unreachable).
+    """
+    final_url = profile.https_root.final_url
+    if final_url:
+        parsed = urlparse(final_url)
+        if parsed.scheme in ('http', 'https') and parsed.netloc:
+            return f'{parsed.scheme}://{parsed.netloc}'
+    return fallback_origin
 
 
 def run_probe(target_url: str, emit: Optional[EmitCallback] = None) -> SiteProfile:
@@ -417,16 +464,32 @@ def run_probe(target_url: str, emit: Optional[EmitCallback] = None) -> SiteProfi
     # 12. robots.txt (soft-fail)
     emit('robots', 'start')
     if _budget_remaining(deadline) > 1.0:
-        robots = _http_get(
-            f'https://{hostname}/robots.txt',
+        origin = _robots_origin(profile, normalized.rstrip('/'))
+        robots_res = _http_get(
+            f'{origin}/robots.txt',
             min(REQUEST_TIMEOUT_SECONDS, _budget_remaining(deadline)),
+            allow_redirects=True,
         )
-        if robots.status == 200 and robots.body_snippet:
-            profile.robots_txt = robots.body_snippet[:4096]
-            emit('robots', 'ok', {'has_robots': True})
+        body = robots_res.body_snippet or ''
+        if robots_res.error:
+            profile.robots = robots_mod.absent('error', robots_res.status)
+        elif robots_res.status != 200 or not body:
+            profile.robots = robots_mod.absent('not_found', robots_res.status)
+        elif not _is_robots_body(robots_res.headers, body):
+            profile.robots = robots_mod.absent('not_text', robots_res.status)
         else:
-            emit('robots', 'ok', {'has_robots': False})
+            truncated = len(body) > ROBOTS_RAW_DISPLAY_CHARS
+            profile.robots_txt = body[:ROBOTS_RAW_DISPLAY_CHARS]
+            profile.robots = robots_mod.parse(body, truncated=truncated)
+            profile.robots.fetch_status = robots_res.status
+        emit('robots', 'ok', {
+            'has_robots': profile.robots.present,
+            'disallow_count': profile.robots.total_disallow_count,
+            'sensitive_count': len(profile.robots.sensitive_paths),
+            'sitemap_count': len(profile.robots.sitemaps),
+        })
     else:
+        profile.robots = robots_mod.absent('skipped')
         emit('robots', 'skip', {'error': 'time budget exceeded'})
 
     # 13. Auth surface

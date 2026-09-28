@@ -34,6 +34,7 @@ class HttpResult:
     set_cookie_headers: list[str] = field(default_factory=list)  # raw values for flag analysis
     body_snippet: Optional[str] = None       # first ~200KB
     redirect_target: Optional[str] = None    # if Location header present
+    final_url: Optional[str] = None          # post-redirect URL; == url when not followed
     elapsed_ms: Optional[int] = None
     error: Optional[str] = None
 
@@ -148,6 +149,40 @@ class CacheAnalysisReport:
 
 
 @dataclass
+class RobotsGroup:
+    """One `User-agent:` block from robots.txt.
+
+    Consecutive User-agent lines share a single group of rules, per the
+    de-facto standard (and RFC 9309).
+    """
+    user_agents: list[str] = field(default_factory=list)
+    disallow: list[str] = field(default_factory=list)
+    allow: list[str] = field(default_factory=list)
+    crawl_delay: Optional[float] = None
+
+
+@dataclass
+class RobotsReport:
+    """Parsed robots.txt.
+
+    `present` is False whenever we have nothing usable to parse; `fetch_reason`
+    says why ('not_found' | 'not_text' | 'error' | 'skipped'). The remaining
+    fields are only meaningful when `present` is True.
+    """
+    present: bool = False
+    fetch_status: Optional[int] = None
+    fetch_reason: Optional[str] = None
+    groups: list[RobotsGroup] = field(default_factory=list)
+    sitemaps: list[str] = field(default_factory=list)
+    unknown_directives: list[str] = field(default_factory=list)
+    sensitive_paths: list[str] = field(default_factory=list)   # disallowed paths that look like admin surface
+    disallows_everything: bool = False          # `Disallow: /` under the `*` group
+    wildcard_crawl_delay: Optional[float] = None
+    total_disallow_count: int = 0
+    truncated: bool = False                     # raw display copy was cut; parsing used the full body
+
+
+@dataclass
 class DnsSecurityReport:
     """Records adjacent to WAF posture that are cheap to fetch."""
     spf: Optional[str] = None                    # SPF record from TXT root (if any)
@@ -210,6 +245,7 @@ class SiteProfile:
     bot_management: list[BotVendor] = field(default_factory=list)
     apex_www: ApexWwwCheck = field(default_factory=ApexWwwCheck)
     cache_analysis: CacheAnalysisReport = field(default_factory=CacheAnalysisReport)
+    robots: RobotsReport = field(default_factory=RobotsReport)
 
     def to_dict(self) -> dict:
         return asdict(self)

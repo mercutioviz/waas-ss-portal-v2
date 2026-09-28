@@ -67,6 +67,8 @@
 {% set dns_sec = probe.get('dns_security', {}) %}
 {% set bots = probe.get('bot_management', []) %}
 {% set aw = probe.get('apex_www', {}) %}
+{# `.get` defaults matter — profiles stored before a check existed lack its key. #}
+{% set robots = probe.get('robots', {}) %}
 {% set cache = probe.get('cache_analysis', {}) %}
 {% set cache_page = cache.get('page', {}) %}
 {% set cache_assets = cache.get('assets', {}) %}
@@ -489,6 +491,107 @@
     </ul>
     {% endcall %}
     {% endif %}
+
+    {# ── robots.txt ── #}
+    {% call card('robots', _('robots.txt'), 'file-text') %}
+    {% if not robots.get('present') %}
+        <p class="text-muted mb-0">
+            {% if robots.get('fetch_reason') == 'not_text' %}
+                {{ _('The response to /robots.txt was not a text file — a catch-all route is likely answering for it.') }}
+            {% elif robots.get('fetch_reason') == 'skipped' %}
+                {{ _('Skipped — the probe ran out of time budget.') }}
+            {% elif robots.get('fetch_reason') == 'error' %}
+                {{ _('Could not be fetched.') }}
+            {% else %}
+                {{ _('This site does not publish a robots.txt.') }}
+            {% endif %}
+        </p>
+    {% else %}
+        <div class="d-flex flex-wrap gap-3 mb-3 small">
+            <span>{{ _('Disallow rules') }}: <strong>{{ robots.get('total_disallow_count', 0) }}</strong></span>
+            <span>{{ _('Groups') }}: <strong>{{ robots.get('groups', [])|length }}</strong></span>
+            <span>{{ _('Sitemaps') }}: <strong>{{ robots.get('sitemaps', [])|length }}</strong></span>
+            {% if robots.get('wildcard_crawl_delay') is not none %}
+            <span>{{ _('Crawl-delay') }}: <strong>{{ robots.get('wildcard_crawl_delay') }}s</strong></span>
+            {% endif %}
+        </div>
+
+        {% if robots.get('sensitive_paths') %}
+        <div class="alert alert-warning py-2">
+            <div class="fw-semibold mb-1">
+                <i class="bi bi-exclamation-triangle"></i>
+                {{ _('Sensitive paths disclosed publicly') }}
+            </div>
+            <div class="small mb-0">
+                {% for p in robots.get('sensitive_paths') %}<code class="me-2">{{ p }}</code>{% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if robots.get('disallows_everything') %}
+        <div class="alert alert-warning py-2 small">
+            <i class="bi bi-exclamation-triangle"></i>
+            {{ _('All crawlers are blocked from the entire site (Disallow: / for *).') }}
+        </div>
+        {% endif %}
+
+        {% if robots.get('groups') %}
+        <table class="table table-sm table-hover mb-3">
+            <thead>
+                <tr>
+                    <th>{{ _('User-agent') }}</th>
+                    <th>{{ _('Disallow') }}</th>
+                    <th>{{ _('Allow') }}</th>
+                    <th>{{ _('Crawl-delay') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in robots.get('groups') %}
+                <tr>
+                    <td>{% for ua in g.get('user_agents', []) %}<code class="d-block">{{ ua }}</code>{% endfor %}</td>
+                    <td>
+                        {% for p in g.get('disallow', []) %}
+                        <code class="d-block{% if p in robots.get('sensitive_paths', []) %} text-danger fw-semibold{% endif %}">{{ p }}</code>
+                        {% else %}<span class="text-muted">—</span>{% endfor %}
+                    </td>
+                    <td>
+                        {% for p in g.get('allow', []) %}<code class="d-block">{{ p }}</code>
+                        {% else %}<span class="text-muted">—</span>{% endfor %}
+                    </td>
+                    <td>{{ g.get('crawl_delay') if g.get('crawl_delay') is not none else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if robots.get('sitemaps') %}
+        <div class="text-uppercase text-muted small fw-semibold mb-1">{{ _('Sitemaps') }}</div>
+        <ul class="list-unstyled small mb-3">
+            {% for s in robots.get('sitemaps') %}
+            <li><code>{{ s }}</code></li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if robots.get('unknown_directives') %}
+        <p class="text-muted small mb-3">
+            {{ _('Unrecognized directives') }}:
+            {% for d in robots.get('unknown_directives') %}<code class="me-1">{{ d }}</code>{% endfor %}
+        </p>
+        {% endif %}
+
+        {% if probe.get('robots_txt') %}
+        <details>
+            <summary class="small text-muted">
+                {{ _('Raw robots.txt') }}
+                {% if robots.get('truncated') %}<span class="badge bg-secondary ms-1">{{ _('truncated') }}</span>{% endif %}
+            </summary>
+            <pre class="small bg-body-secondary p-2 mt-2 mb-0" style="max-height: 20rem; overflow: auto;">{{ probe.get('robots_txt') }}</pre>
+        </details>
+        {% endif %}
+    {% endif %}
+    {% endcall %}
 
 </div>
 

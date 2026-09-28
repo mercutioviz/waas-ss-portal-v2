@@ -6,12 +6,15 @@ from app.profiler.recommender import ALLOWED_FORM_FIELDS, recommend
 from app.profiler.schemas import (
     ApexWwwCheck,
     AssetCacheSummary,
+    BotVendor,
     CacheAnalysisReport,
     CachePageReport,
     CookieAnalysis,
     DnsResult,
     DnsSecurityReport,
     HttpResult,
+    RobotsGroup,
+    RobotsReport,
     SecurityHeadersReport,
     SiteProfile,
     SubresourceReport,
@@ -64,6 +67,7 @@ def _profile(
     bot_management=None,
     apex_www=None,
     cache_analysis=None,
+    robots=None,
 ):
     if target_url is None:
         target_url = f'https://{hostname}/'
@@ -95,6 +99,9 @@ def _profile(
         bot_management=list(bot_management) if bot_management is not None else [],
         apex_www=apex_www if apex_www is not None else ApexWwwCheck(),
         cache_analysis=cache_analysis if cache_analysis is not None else CacheAnalysisReport(),
+        # A bare-but-present robots.txt is the quiet default: an absent one is
+        # itself advisory-worthy, which would noise up every other test.
+        robots=robots if robots is not None else RobotsReport(present=True),
     )
 
 
@@ -409,3 +416,76 @@ class TestApexWwwAdvisories:
         aw = ApexWwwCheck(apex='acme.com', www_host='www.acme.com', applicable=True, verdict='none')
         result = recommend(_profile(apex_www=aw))
         assert not any('redirect is good' in t.lower() or 'must be changed' in t.lower() for t in _titles(result))
+
+
+class TestRobotsAdvisories:
+    def test_bare_present_robots_produces_no_advisory(self):
+        result = recommend(_profile())
+        assert not any('robots.txt' in t for t in _titles(result))
+
+    def test_absent_robots_produces_info(self):
+        result = recommend(_profile(robots=RobotsReport(present=False, fetch_reason='not_found')))
+        adv = [a for a in result['advisories'] if a['title'] == 'No robots.txt found']
+        assert adv and adv[0]['severity'] == 'info'
+
+    def test_not_text_reason_is_explained(self):
+        result = recommend(_profile(robots=RobotsReport(present=False, fetch_reason='not_text')))
+        adv = [a for a in result['advisories'] if a['title'] == 'No robots.txt found']
+        assert 'catch-all route' in adv[0]['body']
+
+    def test_sensitive_paths_produce_warning_naming_the_paths(self):
+        robots = RobotsReport(
+            present=True,
+            groups=[RobotsGroup(user_agents=['*'], disallow=['/wp-admin/', '/backup/'])],
+            sensitive_paths=['/wp-admin/', '/backup/'],
+            total_disallow_count=2,
+        )
+        result = recommend(_profile(robots=robots))
+        adv = [a for a in result['advisories'] if 'sensitive path' in a['title']]
+        assert adv and adv[0]['severity'] == 'warning'
+        assert '/wp-admin/' in adv[0]['body'] and '/backup/' in adv[0]['body']
+        assert 'URL access rules' in adv[0]['body']
+
+    def test_long_sensitive_path_list_is_summarized(self):
+        paths = [f'/admin-{i}/' for i in range(12)]
+        robots = RobotsReport(present=True, sensitive_paths=paths, total_disallow_count=12)
+        result = recommend(_profile(robots=robots))
+        adv = [a for a in result['advisories'] if 'sensitive path' in a['title']][0]
+        assert 'discloses 12 sensitive path(s)' in adv['title']
+        assert 'and 4 more' in adv['body']
+
+    def test_disallow_everything_produces_warning(self):
+        robots = RobotsReport(present=True, disallows_everything=True, total_disallow_count=1)
+        result = recommend(_profile(robots=robots))
+        adv = [a for a in result['advisories'] if 'blocks all crawlers' in a['title']]
+        assert adv and adv[0]['severity'] == 'warning'
+
+    def test_crawl_delay_produces_info(self):
+        robots = RobotsReport(present=True, wildcard_crawl_delay=10.0)
+        result = recommend(_profile(robots=robots))
+        adv = [a for a in result['advisories'] if 'crawl delay' in a['title']]
+        assert adv and adv[0]['severity'] == 'info'
+        assert 'crawl delay of 10s' in adv[0]['title']
+
+    def test_crawl_delay_cross_references_bot_vendors(self):
+        robots = RobotsReport(present=True, wildcard_crawl_delay=5.0)
+        result = recommend(_profile(
+            robots=robots,
+            bot_management=[BotVendor(name='DataDome', evidence='js.datadome.co')],
+        ))
+        adv = [a for a in result['advisories'] if 'crawl delay' in a['title']][0]
+        assert 'DataDome' in adv['body']
+
+    def test_sitemaps_produce_info(self):
+        robots = RobotsReport(present=True, sitemaps=['https://acme.example.com/sitemap.xml'])
+        result = recommend(_profile(robots=robots))
+        adv = [a for a in result['advisories'] if 'sitemap(s) declared' in a['title']]
+        assert adv and adv[0]['severity'] == 'info'
+        assert 'sitemap.xml' in adv[0]['body']
+
+    def test_absent_robots_suppresses_content_advisories(self):
+        """An absent report carries stale zero-values; none of the content
+        advisories should fire off them."""
+        result = recommend(_profile(robots=RobotsReport(present=False, fetch_reason='not_found')))
+        titles = _titles(result)
+        assert not any('sensitive path' in t or 'blocks all crawlers' in t for t in titles)
