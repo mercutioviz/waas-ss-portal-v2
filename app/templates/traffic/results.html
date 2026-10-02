@@ -28,6 +28,15 @@
             </button>
         </form>
         {% endif %}
+        {% if can_analyze %}
+        <form method="post" action="{{ url_for('traffic.analyze_pull_route', pull_id=pull.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-repeat"></i>
+                {% if analysis %}{{ _('Re-run analysis') }}{% else %}{{ _('Analyze') }}{% endif %}
+            </button>
+        </form>
+        {% endif %}
     </div>
 </div>
 
@@ -132,11 +141,333 @@
 </div>
 {% endif %}
 
-<div class="card">
-    <div class="card-body text-muted">
-        <i class="bi bi-hourglass"></i>
-        {{ _('Cache, crawler and robots.txt analysis over this collection is the
-             next phase. The rows are on disk and ready for it.') }}
+{% set category_labels = {
+    'waas_config': _('WaaS configuration'),
+    'origin': _('Origin / backend'),
+    'robots': _('robots.txt')
+} %}
+{% set category_badges = {
+    'waas_config': 'bg-primary-subtle text-primary-emphasis',
+    'origin': 'bg-warning-subtle text-warning-emphasis',
+    'robots': 'bg-info-subtle text-info-emphasis'
+} %}
+
+{% macro finding_card(f) %}
+<div class="border-start border-4 {% if f.severity == 'warning' %}border-warning{% else %}border-info{% endif %} ps-3 py-2 mb-3">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+        <strong>{{ f.title }}</strong>
+        <span class="badge {{ category_badges.get(f.category, 'bg-secondary') }} flex-shrink-0">
+            {{ category_labels.get(f.category, f.category or _('General')) }}
+        </span>
+    </div>
+    <div class="small text-muted" style="white-space: pre-line;">{{ f.detail }}</div>
+</div>
+{% endmacro %}
+
+{% if analysis.get('error') %}
+<div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle"></i>
+    {{ _('The analysis failed: %(err)s', err=analysis['error']) }}
+</div>
+{% elif analysis %}
+
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">{{ _('Cache analysis') }}</h5></div>
+    <div class="card-body">
+        <div class="row text-center g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Redundant fetches') }}</div>
+                <div class="fs-4">
+                    {{ '{:,}'.format(analysis['repeat_fetch']['excess_requests']) }}
+                </div>
+                <div class="text-muted small">
+                    {% if analysis['repeat_fetch']['excess_share'] %}
+                    {{ '%.1f'|format(analysis['repeat_fetch']['excess_share'] * 100) }}%
+                    {{ _('of static traffic') }}
+                    {% else %}&mdash;{% endif %}
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Wasted egress') }}</div>
+                <div class="fs-4">{{ analysis['repeat_fetch']['extrapolated_bytes'] | filesizeformat }}</div>
+                <div class="text-muted small">{{ _('extrapolated over the window') }}</div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Browser revalidation') }}</div>
+                <div class="fs-4">
+                    {% if analysis['revalidation']['static_ratio'] is not none %}
+                    {{ '%.1f'|format(analysis['revalidation']['static_ratio'] * 100) }}%
+                    {% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ _('304s on static assets') }}</div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Edge cache') }}</div>
+                <div class="fs-4">
+                    {% if analysis['edge_cache']['static_hit_rate'] is not none %}
+                    {{ '%.1f'|format(analysis['edge_cache']['static_hit_rate'] * 100) }}%
+                    {% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ _('static hits at WaaS') }}</div>
+            </div>
+        </div>
+
+        <p class="text-muted small">
+            {{ _('Redundant fetches are the headline number: the same client asking
+                 for the same URL again within %(mins)s minutes. A correctly cached
+                 asset produces no request at all, so a 304 is already a failure —
+                 a full round-trip for nothing — and a 200 is total failure. Edge
+                 cache and browser revalidation are different mechanisms and are
+                 shown separately for that reason.',
+                 mins=analysis['repeat_fetch']['bucket_seconds'] // 60) }}
+        </p>
+
+        {% if analysis['findings'] %}
+        <hr>
+        {% for f in analysis['findings'] %}{{ finding_card(f) }}{% endfor %}
+        {% else %}
+        <div class="text-muted small">
+            <i class="bi bi-check-circle text-success"></i>
+            {{ _('Nothing above the reporting thresholds in this collection.') }}
+        </div>
+        {% endif %}
     </div>
 </div>
+
+{% if analysis['repeat_fetch']['top'] %}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">{{ _('Most refetched assets') }}</h5></div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('URL') }}</th>
+                        <th class="text-end">{{ _('Redundant fetches') }}</th>
+                        <th class="text-end">{{ _('Avg size') }}</th>
+                        <th class="text-end">{{ _('Wasted') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in analysis['repeat_fetch']['top'] %}
+                    <tr>
+                        <td class="text-break"><code class="small">{{ row.url }}</code></td>
+                        <td class="text-end">{{ '{:,}'.format(row.excess) }}</td>
+                        <td class="text-end">{{ row.avg_bytes | filesizeformat }}</td>
+                        <td class="text-end">{{ row.bytes | filesizeformat }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted small mb-0 mt-2">
+            {{ _('404s are excluded from this ranking and reported separately — a
+                 path that 404s in a loop outranks every real asset and says
+                 nothing about caching.') }}
+        </p>
+    </div>
+</div>
+{% endif %}
+
+{% if analysis['revalidation']['by_extension'] %}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">{{ _('Revalidation by file type') }}</h5></div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Type') }}</th>
+                        <th class="text-end">{{ _('200 (full body)') }}</th>
+                        <th class="text-end">{{ _('304 (revalidated)') }}</th>
+                        <th class="text-end">{{ _('Revalidation ratio') }}</th>
+                        <th class="text-end">{{ _('Bytes shipped') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in analysis['revalidation']['by_extension'] %}
+                    <tr>
+                        <td>
+                            <code>{{ row.extension }}</code>
+                            {% if not row.static %}<span class="text-muted small">{{ _('dynamic') }}</span>{% endif %}
+                        </td>
+                        <td class="text-end">{{ '{:,}'.format(row.full) }}</td>
+                        <td class="text-end">{{ '{:,}'.format(row.revalidated) }}</td>
+                        <td class="text-end">
+                            {% if row.ratio is not none %}{{ '%.2f'|format(row.ratio * 100) }}%{% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="text-end">{{ row.bytes_full | filesizeformat }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if analysis['hosts'] | length > 1 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">{{ _('By host') }}</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Host') }}</th>
+                        <th class="text-end">{{ _('Requests') }}</th>
+                        <th class="text-end">{{ _('Share') }}</th>
+                        <th class="text-end">{{ _('Bytes') }}</th>
+                        <th class="text-end">{{ _('Share') }}</th>
+                        <th class="text-end">{{ _('Skew') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in analysis['hosts'] %}
+                    <tr>
+                        <td class="text-break"><code class="small">{{ row.host or _('(none)') }}</code></td>
+                        <td class="text-end">{{ '{:,}'.format(row.requests) }}</td>
+                        <td class="text-end">
+                            {% if row.request_share is not none %}{{ '%.1f'|format(row.request_share * 100) }}%{% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="text-end">{{ row.bytes | filesizeformat }}</td>
+                        <td class="text-end">
+                            {% if row.byte_share is not none %}{{ '%.1f'|format(row.byte_share * 100) }}%{% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% if row.skew %}{{ '%.1f'|format(row.skew) }}&times;{% else %}&mdash;{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted small mb-0 mt-2">
+            {{ _('Skew is byte share divided by request share. Bytes sent include
+                 response headers, so this is wire egress rather than body size.') }}
+        </p>
+    </div>
+</div>
+{% endif %}
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">{{ _('Origin cache headers') }}</h5>
+        {% if analysis['audit_targets'] %}
+        <form method="post" action="{{ url_for('traffic.header_audit_route', pull_id=pull.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-broadcast"></i>
+                {% if header_audit %}{{ _('Re-probe') }}{% else %}{{ _('Probe %(n)s assets', n=analysis['audit_targets']|length) }}{% endif %}
+            </button>
+        </form>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        {% if not header_audit %}
+        <p class="text-muted mb-0">
+            {{ _('The log rows say how often an asset is refetched; they do not say
+                 why. This sends live requests to the busiest assets and asks the
+                 origin three separate conditional questions — ETag alone, date
+                 alone, then both — because a single probe carrying both validators
+                 reports "conditional requests unsupported" and hides the cause.') }}
+            {% if analysis['audit_targets'] %}
+            <br><span class="small">{{ _('It will send about %(n)s requests to the
+                customer\'s live origin.', n=analysis['audit_targets']|length * 4) }}</span>
+            {% else %}
+            <br><span class="small">{{ _('No eligible assets: the analysis found no
+                successful static requests on a publicly resolvable host.') }}</span>
+            {% endif %}
+        </p>
+        {% else %}
+        {% if header_audit.get('error') %}
+        <div class="alert alert-danger">{{ header_audit['error'] }}</div>
+        {% endif %}
+        {% for f in header_audit.get('findings', []) %}{{ finding_card(f) }}{% endfor %}
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Asset') }}</th>
+                        <th class="text-end">{{ _('Status') }}</th>
+                        <th>{{ _('Cache-Control') }}</th>
+                        <th class="text-center">{{ _('ETag') }}</th>
+                        <th class="text-center">{{ _('Last-Mod') }}</th>
+                        <th class="text-center" title="{{ _('If-None-Match only') }}">{{ _('INM') }}</th>
+                        <th class="text-center" title="{{ _('If-Modified-Since only') }}">{{ _('IMS') }}</th>
+                        <th class="text-center" title="{{ _('Both validators') }}">{{ _('Both') }}</th>
+                        <th>{{ _('Verdict') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in header_audit.get('assets', []) %}
+                    <tr>
+                        <td class="text-break">
+                            <code class="small">{{ a.host }}{{ a.url }}</code>
+                        </td>
+                        <td class="text-end">{{ a.status or '—' }}</td>
+                        <td class="small text-break">{{ a.cache_control or '—' }}</td>
+                        <td class="text-center">{% if a.etag %}<i class="bi bi-check text-success"></i>{% else %}&mdash;{% endif %}</td>
+                        <td class="text-center">{% if a.last_modified %}<i class="bi bi-check text-success"></i>{% else %}&mdash;{% endif %}</td>
+                        <td class="text-center">{{ a.inm_status or '—' }}</td>
+                        <td class="text-center">{{ a.ims_status or '—' }}</td>
+                        <td class="text-center">{{ a.both_status or '—' }}</td>
+                        <td class="small">
+                            {% if a.verdict == 'conditional_ok' %}
+                            <span class="text-success">{{ _('OK') }}</span>
+                            {% elif a.verdict == 'etag_suppresses_last_modified' %}
+                            <span class="text-danger">{{ _('ETag cancels Last-Modified') }}</span>
+                            {% elif a.verdict == 'etag_rejected' %}
+                            <span class="text-danger">{{ _('ETag rejected') }}</span>
+                            {% elif a.verdict == 'no_validators' %}
+                            <span class="text-warning">{{ _('No validators') }}</span>
+                            {% elif a.verdict == 'no_conditional_support' %}
+                            <span class="text-warning">{{ _('Conditionals ignored') }}</span>
+                            {% elif a.verdict == 'challenged' %}
+                            <span class="text-muted">{{ _('Challenged') }}</span>
+                            {% else %}
+                            <span class="text-muted">{{ a.verdict }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if header_audit.get('budget_exceeded') %}
+        <p class="text-muted small mt-2 mb-0">
+            {{ _('The probe budget ran out before every asset was tested; the rest
+                 were skipped rather than left half-measured.') }}
+        </p>
+        {% endif %}
+        {% if header_audit.get('skipped_hosts') %}
+        <p class="text-muted small mt-2 mb-0">
+            {{ _('Skipped hosts (not publicly resolvable, so not probed): %(hosts)s',
+                 hosts=header_audit['skipped_hosts']|join(', ')) }}
+        </p>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+{% else %}
+<div class="card">
+    <div class="card-body text-muted">
+        {% if pull.phase == 'analyzing' %}
+        <span class="spinner-border spinner-border-sm me-2"></span>
+        {{ _('Analyzing the collected rows. Reload in a moment.') }}
+        {% elif pull.raw_deleted %}
+        <i class="bi bi-archive"></i>
+        {{ _('No analysis was stored for this pull, and the raw rows have expired.
+             A new pull is needed.') }}
+        {% else %}
+        <i class="bi bi-hourglass"></i>
+        {{ _('No analysis has been run over this collection yet.') }}
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 {% endblock %}

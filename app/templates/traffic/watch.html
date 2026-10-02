@@ -109,7 +109,11 @@
         bar.style.width = d.percent + '%';
         bar.textContent = d.percent + '%';
 
-        document.getElementById('phaseLabel').textContent = phases[d.phase] || d.phase;
+        var phaseText = phases[d.phase] || d.phase;
+        if (d.phase === 'analyzing' && d.analysis_rows) {
+            phaseText += ' (' + d.analysis_rows.toLocaleString() + ' {{ _("rows") }})';
+        }
+        document.getElementById('phaseLabel').textContent = phaseText;
         document.getElementById('rowsLabel').textContent = d.rows_fetched.toLocaleString();
         document.getElementById('daysLabel').textContent = d.days_done + ' / ' + d.days_total;
         document.getElementById('diskLabel').textContent = fmtBytes(d.bytes_on_disk || 0);

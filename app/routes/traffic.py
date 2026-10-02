@@ -8,7 +8,9 @@
     GET  /traffic/<id>/status           — JSON progress, the durable source of truth
     POST /traffic/<id>/cancel           — cooperative cancel
     POST /traffic/<id>/resume           — restart an interrupted pull from its checkpoints
-    GET  /traffic/<id>/results          — collection summary
+    GET  /traffic/<id>/results          — collection summary + cache analysis
+    POST /traffic/<id>/analyze          — re-run the cache analysis over rows on disk
+    POST /traffic/<id>/audit            — live header audit of the busiest assets
 
 Only one pull runs at a time. The portal is a single gevent worker, so two
 concurrent multi-hour pulls would contend for one event loop and make the
@@ -31,7 +33,7 @@ from flask_babel import gettext as _
 from flask_login import current_user, login_required
 
 from app import db, socketio
-from app.background_tasks import run_log_pull
+from app.background_tasks import run_header_audit, run_log_pull, run_log_pull_analysis
 from app.logpull import corpus_bytes, preflight
 from app.logpull.preflight import MAX_TOTAL_BYTES, format_duration
 from app.logpull.source import LogSource
@@ -387,10 +389,77 @@ def resume_pull(pull_id):
 def pull_results(pull_id):
     pull = _get_pull_or_404(pull_id)
     store = PullStore(current_app.instance_path, pull.id)
+    summary = pull.result or {}
+    analysis = summary.get('analysis') or {}
+    report = pull.report or {}
     return render_template(
         'traffic/results.html',
         pull=pull,
-        summary=pull.result or {},
+        summary=summary,
+        analysis=analysis,
+        header_audit=report.get('header_audit') or {},
         status_badges=STATUS_BADGES,
         on_disk=store.size_bytes(),
+        can_analyze=not pull.raw_deleted and not pull.is_active
+        and pull.phase != LogPull.PHASE_ANALYZING,
     )
+
+
+@bp.route('/<int:pull_id>/analyze', methods=['POST'])
+@login_required
+def analyze_pull_route(pull_id):
+    """Re-run the cache analysis over rows already on disk.
+
+    Collection is the expensive half and the analysis keeps gaining metrics,
+    so a pull from last week should be able to pick up this week's findings
+    without re-fetching anything.
+    """
+    pull = _get_pull_or_404(pull_id)
+    if pull.is_active or pull.phase == LogPull.PHASE_ANALYZING:
+        flash(_('That pull is still working. Wait for it to finish.'), 'info')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+    if pull.raw_deleted:
+        flash(_('The raw rows for that pull have expired, so there is nothing '
+                'left to re-analyze. Start a new pull.'), 'warning')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+    pull.phase = LogPull.PHASE_ANALYZING
+    db.session.commit()
+
+    AuditLog.log(user_id=current_user.id, action='logpull_analyze',
+                 details=f'Re-ran analysis for log pull #{pull.id} ({pull.app_name})')
+
+    real_app = current_app._get_current_object()
+    socketio.start_background_task(run_log_pull_analysis, real_app, pull.id)
+    flash(_('Analysis started. Reload this page in a moment.'), 'info')
+    return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+
+@bp.route('/<int:pull_id>/audit', methods=['POST'])
+@login_required
+def header_audit_route(pull_id):
+    """Probe the busiest static assets live.
+
+    This is a separate, explicit action because it sends real requests to the
+    customer's origin. Collecting logs is passive; this is not, so it is not
+    something the portal should do as a side effect.
+    """
+    pull = _get_pull_or_404(pull_id)
+    analysis = (pull.result or {}).get('analysis') or {}
+    targets = analysis.get('audit_targets') or []
+    if not targets:
+        flash(_('No assets to probe. Run the analysis first — the audit uses the '
+                'busiest static assets it finds.'), 'warning')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+    AuditLog.log(
+        user_id=current_user.id, action='logpull_header_audit',
+        details=f'Header audit of {len(targets)} asset(s) for log pull '
+                f'#{pull.id} ({pull.app_name})',
+    )
+
+    real_app = current_app._get_current_object()
+    socketio.start_background_task(run_header_audit, real_app, pull.id)
+    flash(_('Probing %(n)s assets. This takes a minute or two — reload to see '
+            'the results.', n=len(targets)), 'info')
+    return redirect(url_for('traffic.pull_results', pull_id=pull.id))

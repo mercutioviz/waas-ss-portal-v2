@@ -1,6 +1,7 @@
 """Background task helpers for WebSocket-powered operations."""
 
 import logging
+import time
 import traceback
 from datetime import datetime, timedelta
 
@@ -429,6 +430,8 @@ def run_log_pull(app, pull_id: int, session_id: str) -> None:
                 db.session.commit()
 
             summary = runner.run()
+            summary['analysis'] = _analyze_collected(app, pull, summary, emit,
+                                                     runner.store)
 
             pull.result = summary
             pull.status = LogPull.STATUS_COMPLETE
@@ -458,6 +461,116 @@ def run_log_pull(app, pull_id: int, session_id: str) -> None:
 
         finally:
             clear_join_signal(session_id)
+
+
+#: Emit an analysis progress tick at most this often. The parse is a tight
+#: loop over millions of rows; a socket write per chunk would cost more than
+#: the parsing.
+ANALYSIS_EMIT_INTERVAL_SECONDS = 2.0
+
+
+def _analyze_collected(app, pull, summary, emit, store=None):
+    """Run the cache analysis over the rows just collected.
+
+    Failure here is not failure of the pull. The rows are on disk and the
+    collection is the expensive part, so an analysis that blows up leaves a
+    complete pull with an `analysis_error` the user can retry, rather than
+    throwing away hours of fetching.
+    """
+    from app.logpull.analysis import analyze_pull
+    from app.logpull.store import PullStore
+    from app.models import LogPull
+
+    store = store or PullStore(app.instance_path, pull.id)
+    pull.phase = LogPull.PHASE_ANALYZING
+    db.session.commit()
+    emit(pull.to_dict())
+
+    state = {'last': 0.0}
+
+    def on_progress(rows):
+        now = time.monotonic()
+        if now - state['last'] < ANALYSIS_EMIT_INTERVAL_SECONDS:
+            return
+        state['last'] = now
+        emit({**pull.to_dict(), 'analysis_rows': rows})
+
+    try:
+        return analyze_pull(store, summary, on_progress=on_progress)
+    except Exception as e:  # noqa: BLE001 — never lose a completed collection
+        logger.error(f'log pull {pull.id} analysis failed: {traceback.format_exc()}')
+        return {'error': str(e)[:300]}
+
+
+def run_log_pull_analysis(app, pull_id: int) -> None:
+    """Re-run the cache analysis over an already-collected pull.
+
+    Needed because the analysis is cheap relative to the collection and its
+    logic will keep changing: a pull collected last week should be able to
+    benefit from this week's metrics without spending hours re-fetching rows
+    that are already on disk.
+    """
+    from app.logpull.store import PullStore
+    from app.models import LogPull
+
+    with app.app_context():
+        pull = db.session.get(LogPull, pull_id)
+        if pull is None:
+            logger.error(f'run_log_pull_analysis: no LogPull with id={pull_id}')
+            return
+
+        def emit(payload):
+            socketio.emit('logpull_progress', payload, room=pull.session_id)
+
+        store = PullStore(app.instance_path, pull.id)
+        previous_phase = pull.phase
+        try:
+            summary = pull.result or {}
+            analysis = _analyze_collected(app, pull, summary, emit, store)
+            summary['analysis'] = analysis
+            pull.result = summary
+            pull.phase = LogPull.PHASE_DONE
+            db.session.commit()
+            emit(pull.to_dict())
+        except Exception:  # noqa: BLE001 — defensive; _analyze_collected catches its own
+            logger.error(f'run_log_pull_analysis error: {traceback.format_exc()}')
+            db.session.rollback()
+            pull.phase = previous_phase
+            db.session.commit()
+
+
+def run_header_audit(app, pull_id: int) -> None:
+    """Probe the busiest static assets live and record what came back.
+
+    Separate from the pull on purpose: this sends real requests to the
+    customer's origin, so it is something a user asks for explicitly rather
+    than a side effect of collecting logs.
+    """
+    from app.logpull.header_audit import audit
+    from app.models import LogPull
+
+    with app.app_context():
+        pull = db.session.get(LogPull, pull_id)
+        if pull is None:
+            logger.error(f'run_header_audit: no LogPull with id={pull_id}')
+            return
+
+        analysis = (pull.result or {}).get('analysis') or {}
+        targets = analysis.get('audit_targets') or []
+        report = pull.report or {}
+        try:
+            report['header_audit'] = audit(targets)
+        except Exception as e:  # noqa: BLE001 — the audit is best-effort
+            logger.error(f'run_header_audit error: {traceback.format_exc()}')
+            report['header_audit'] = {
+                'error': str(e)[:300], 'assets': [], 'findings': [],
+                'probed': 0, 'requested': len(targets),
+            }
+        report['header_audit']['skipped_hosts'] = analysis.get('audit_skipped_hosts') or []
+        pull.report = report
+        db.session.commit()
+        socketio.emit('logpull_audit_done', {'pull_id': pull.id},
+                      room=pull.session_id)
 
 
 def _finish_pull(pull, status, message, emit):
