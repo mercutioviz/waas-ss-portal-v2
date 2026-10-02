@@ -321,7 +321,7 @@ def audit(targets, *, session=None, timeout=PROBE_TIMEOUT, sleep=time.sleep,
 # --- findings --------------------------------------------------------------
 
 
-def _finding(code, severity, category, title, detail, evidence):
+def _finding(code, severity, category, title, detail, evidence, impact=None):
     return {
         'code': code,
         'severity': severity,
@@ -329,7 +329,18 @@ def _finding(code, severity, category, title, detail, evidence):
         'title': title,
         'detail': detail,
         'evidence': evidence,
+        'impact': impact,
     }
+
+
+def _of(subset, records):
+    """The audit's impact figure is always a count out of what was probed.
+
+    Reporting "12 assets" without the denominator would let a probe of 12
+    read like a probe of 200 — and the denominator here is small by design,
+    because each probe is three live requests to the customer's origin.
+    """
+    return f'{len(subset)} of {len(records)} probed assets'
 
 
 def _brief(records):
@@ -362,6 +373,7 @@ def build_findings(records):
             'A single probe carrying both validators would have reported this as '
             '"conditional requests not supported" and hidden the cause entirely.',
             {'assets': _brief(suppressed)},
+            impact=_of(suppressed, records),
         ))
 
     rejected = [r for r in records if r.get('verdict') == VERDICT_ETAG_REJECTED]
@@ -375,6 +387,7 @@ def build_findings(records):
             'validator rewritten in transit, or a load-balanced origin whose nodes '
             'generate different ETags for the same file.',
             {'assets': _brief(rejected)},
+            impact=_of(rejected, records),
         ))
 
     no_lifetime = [r for r in usable if r.get('status') == 200
@@ -390,6 +403,7 @@ def build_findings(records):
             'measured. Giving fingerprinted assets a long max-age removes those '
             'requests outright rather than making them cheaper.',
             {'assets': _brief(no_lifetime)},
+            impact=_of(no_lifetime, records),
         ))
 
     no_validators = [r for r in records if r.get('verdict') == VERDICT_NO_VALIDATORS]
@@ -401,6 +415,7 @@ def build_findings(records):
             'has no way to ask "has this changed?" — once its copy expires the only '
             'option is a full re-download.',
             {'assets': _brief(no_validators)},
+            impact=_of(no_validators, records),
         ))
 
     uncompressed = [
@@ -420,6 +435,7 @@ def build_findings(records):
             'estate, so treat this as context for a bandwidth conversation rather '
             'than a setting to flip unilaterally.',
             {'assets': _brief(uncompressed)},
+            impact=_of(uncompressed, records),
         ))
 
     challenged = [r for r in records if r.get('verdict') == VERDICT_CHALLENGED]
@@ -432,6 +448,7 @@ def build_findings(records):
             'describe the challenge page, not the asset, so they are excluded from '
             'the conclusions above rather than quietly folded in.',
             {'assets': _brief(challenged)},
+            impact=_of(challenged, records),
         ))
 
     errored = [r for r in records if r.get('verdict') == VERDICT_ERROR]
@@ -443,6 +460,7 @@ def build_findings(records):
             'They are listed so the sample size behind the findings above is visible.',
             {'assets': [{'host': r.get('host'), 'url': r.get('url'),
                          'error': r.get('error')} for r in errored[:8]]},
+            impact=_of(errored, records),
         ))
 
     ok = [r for r in records if r.get('verdict') == VERDICT_OK]
@@ -455,6 +473,7 @@ def build_findings(records):
             'on this origin, so any excess traffic the log analysis found is a '
             'freshness-lifetime problem rather than a validator problem.',
             {'assets': _brief(ok)},
+            impact=_of(ok, records),
         ))
 
     return findings

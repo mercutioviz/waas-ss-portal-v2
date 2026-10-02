@@ -1,0 +1,202 @@
+{#
+  In-portal report view.
+
+  Shares `report.build()`'s document with the standalone export but not its
+  markup. The two have genuinely different jobs: this one sits inside the
+  portal chrome and links back to the evidence tables on the results page,
+  while the export has to stand alone on a laptop with no network. Sharing the
+  assembled document and diverging at the markup is the right seam — a single
+  template serving both ends up with Bootstrap classes in the emailed file and
+  a print stylesheet nobody uses here.
+#}
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Report — Analysis #%(id)s', id=pull.id) }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Traffic Analysis'), url_for('traffic.index')),
+    (_('Analysis #%(id)s', id=pull.id), url_for('traffic.pull_results', pull_id=pull.id)),
+    (_('Report'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mt-4 mb-3">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-file-earmark-text"></i> {{ _('Traffic report') }}</h2>
+        <p class="text-muted mb-0">
+            <code>{{ doc.meta.app_name }}</code>
+            {% if doc.meta.account_name %} · {{ doc.meta.account_name }}{% endif %}
+            · {{ doc.meta.period_start.strftime('%Y-%m-%d') }} → {{ doc.meta.period_end.strftime('%Y-%m-%d') }} UTC
+            · {{ _('%(mode)s collection over %(days)s days',
+                   mode=doc.meta.mode|capitalize, days=doc.meta.window_days) }}
+        </p>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary"
+           href="{{ url_for('traffic.pull_results', pull_id=pull.id) }}">
+            <i class="bi bi-table"></i> {{ _('Evidence') }}
+        </a>
+        <a class="btn btn-primary"
+           href="{{ url_for('traffic.report_download', pull_id=pull.id) }}">
+            <i class="bi bi-download"></i> {{ _('Download HTML') }}
+        </a>
+    </div>
+</div>
+
+<p class="text-muted small">
+    {{ _('A single self-contained file — no network needed to open it, safe to
+         forward to a server team or print.') }}
+</p>
+
+{% if doc.headline %}
+<div class="row g-3 mb-4">
+    {% for k in doc.headline %}
+    <div class="col-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body py-3">
+                <div class="fs-4 fw-semibold
+                    {%- if k.tone == 'bad' %} text-danger
+                    {%- elif k.tone == 'warn' %} text-warning-emphasis
+                    {%- elif k.tone == 'good' %} text-success{% endif %}">{{ k.value }}</div>
+                <div class="small text-muted text-uppercase">{{ k.label }}</div>
+                {% if k.note %}<div class="small text-muted">{{ k.note }}</div>{% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if doc.missing %}
+<div class="alert alert-warning">
+    <h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i>
+        {{ _('Not everything was measured') }}</h6>
+    <p class="small mb-2">
+        {{ _('These analyses have not been run against this collection. An absent
+             section is not a clean result — nothing below describes what they
+             would have found.') }}
+    </p>
+    <ul class="small mb-0">
+        {% for m in doc.missing %}
+        <li><strong>{{ m.what }}</strong> — {{ m.why }}
+            <span class="text-muted">{{ m.how }}</span></li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">{{ _('What was found') }}</h5>
+        <span class="small text-muted">
+            {{ _('%(w)s need attention · %(i)s for information',
+                 w=doc.counts.warning, i=doc.counts.info) }}
+        </span>
+    </div>
+    {% if doc.summary %}
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th style="width:3rem" class="text-end">#</th>
+                    <th>{{ _('Finding') }}</th>
+                    <th>{{ _('Measured') }}</th>
+                    <th>{{ _('Owner') }}</th>
+                    <th>{{ _('Severity') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in doc.summary %}
+                <tr>
+                    <td class="text-end text-muted">{{ loop.index }}</td>
+                    <td><a href="#f-{{ f.code }}" class="text-decoration-none">{{ f.title }}</a></td>
+                    <td class="small text-muted">{{ f.impact or '—' }}</td>
+                    <td class="small">{{ doc.section_labels.get(f.category, f.category) }}</td>
+                    <td>
+                        <span class="badge {% if f.severity == 'warning' %}bg-warning-subtle text-warning-emphasis{% else %}bg-info-subtle text-info-emphasis{% endif %}">
+                            {{ doc.severity_labels.get(f.severity, f.severity) }}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted">
+        {{ _('No findings were produced. Check above for analyses that have not
+             been run — if all of them have, this collection showed no pattern
+             over the reporting thresholds.') }}
+    </div>
+    {% endif %}
+</div>
+
+{% for section in doc.sections %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-1">{{ section.label }}</h5>
+        <div class="small text-muted text-uppercase">{{ section.owner }}</div>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small">{{ section.blurb }}</p>
+
+        {% if section.findings %}
+            {% for f in section.findings %}
+            <div class="border-start border-4 {% if f.severity == 'warning' %}border-warning{% else %}border-info{% endif %} ps-3 py-2 mb-3"
+                 id="f-{{ f.code }}">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <strong>{{ f.title }}</strong>
+                    <span class="badge flex-shrink-0 {% if f.severity == 'warning' %}bg-warning-subtle text-warning-emphasis{% else %}bg-info-subtle text-info-emphasis{% endif %}">
+                        {{ doc.severity_labels.get(f.severity, f.severity) }}
+                    </span>
+                </div>
+                <div class="small text-muted mb-1">
+                    {% if f.impact %}{{ _('Measured:') }} {{ f.impact }} · {% endif %}
+                    {{ _('source: %(s)s', s=f.source) }}
+                </div>
+                <div class="small" style="white-space: pre-line;">{{ f.detail }}</div>
+            </div>
+            {% endfor %}
+        {% else %}
+        <p class="text-muted fst-italic mb-0">
+            {{ _('Nothing in this category crossed a reporting threshold.') }}
+        </p>
+        {% endif %}
+
+        {% if section.key == 'robots' and doc.robots_file %}
+        <hr>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">{{ _('Proposed robots.txt for %(host)s', host=doc.robots_host) }}</h6>
+            <a class="btn btn-sm btn-outline-primary"
+               href="{{ url_for('traffic.robots_download', pull_id=pull.id) }}">
+                <i class="bi bi-download"></i> {{ _('Download') }}
+            </a>
+        </div>
+        <p class="small text-muted">
+            {{ _('Every figure in the header comment was measured by replaying this
+                 exact text against the collected rows.') }}
+        </p>
+        <pre class="bg-dark text-light p-3 rounded small mb-0" style="max-height:28rem;overflow:auto;">{{ doc.robots_file }}</pre>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+
+<div class="card mb-5">
+    <div class="card-header"><h5 class="mb-0">{{ _('Method and known limits') }}</h5></div>
+    <div class="card-body">
+        <p class="small text-muted">
+            {{ _('All collection was read-only against the WaaS v4 logs API, which
+                 was bisected by time window rather than paged past its 10,000-row
+                 cap. Live probes, where they were run, went to public endpoints
+                 only.') }}
+        </p>
+        <ul class="small mb-0">
+            {% for limit in doc.limits %}<li>{{ limit }}</li>{% endfor %}
+        </ul>
+    </div>
+</div>
+{% endblock %}

@@ -233,13 +233,21 @@ def _summarize_errors(logs):
     }
 
 
-def _finding(code, severity, title, detail, evidence):
+def _finding(code, severity, title, detail, evidence, impact=None):
+    """One recommendation.
+
+    `impact` is a short measured figure for the report's summary table —
+    "100% of 61.4M requests reach origin", not "significant". It is optional
+    because not every finding has one honest number to put there, and an
+    invented one would be worse than a blank cell.
+    """
     return {
         'code': code,
         'severity': severity,
         'title': title,
         'detail': detail,
         'evidence': evidence,
+        'impact': impact,
     }
 
 

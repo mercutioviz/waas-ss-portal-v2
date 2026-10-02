@@ -983,9 +983,10 @@ class Replay:
 # --- findings --------------------------------------------------------------
 
 
-def _finding(code, severity, title, detail, evidence):
+def _finding(code, severity, title, detail, evidence, impact=None):
     return {'code': code, 'severity': severity, 'category': CATEGORY_ROBOTS,
-            'title': title, 'detail': detail, 'evidence': evidence}
+            'title': title, 'detail': detail, 'evidence': evidence,
+            'impact': impact}
 
 
 MIN_FINDING_REQUESTS = 100
@@ -1011,7 +1012,8 @@ def build_findings(report):
             'crawl load here is spread across content real visitors also use, '
             'so robots.txt is the wrong lever and caching or rate limiting is '
             'the right one.',
-            {'host': host})]
+            {'host': host},
+            impact='no rule qualified')]
 
     if net.get('requests', 0) >= MIN_FINDING_REQUESTS:
         out.append(_finding(
@@ -1023,7 +1025,9 @@ def build_findings(report):
             f'{net.get("extrapolated_requests", 0):,} requests over the full '
             f'window. robots.txt is served by the origin, so this is a change '
             f'the site team makes, not one the portal can apply.',
-            {'host': host, 'net': net}))
+            {'host': host, 'net': net},
+            impact=f'{net["requests"]:,} sampled requests, '
+                   f'{(net.get("bytes") or 0) / 1e9:.2f} GB'))
 
     with_review = measurement.get('with_review') or {}
     review_rules = [r for r in proposal.get('rules', [])
@@ -1043,7 +1047,8 @@ def build_findings(report):
             f'{(measurement.get("proposed") or {}).get("requests", 0):,} — '
             f'{extra:,} more. Enable the ones whose content you do not need '
             f'indexed.',
-            {'host': host, 'rules': review_rules, 'with_review': with_review}))
+            {'host': host, 'rules': review_rules, 'with_review': with_review},
+            impact=f'{extra:,} further sampled requests if all are enabled'))
 
     crawler_requests = measurement.get('crawler_requests') or 0
     if crawler_requests and (current.get('request_share') or 0) < DEAD_RULE_SHARE \
@@ -1058,7 +1063,8 @@ def build_findings(report):
             '`/news/tag/foo`. Patterns match from the beginning of the path, '
             'so a rule has to name the path the crawler actually requests.',
             {'host': host, 'blocked': current.get('requests', 0),
-             'rules_hit': current.get('rules_hit', [])[:8]}))
+             'rules_hit': current.get('rules_hit', [])[:8]},
+            impact=f'{_pct(current.get("request_share") or 0)} of {crawler_requests:,} crawler requests'))
 
     gap = measurement.get('group_gap') or {}
     if gap.get('gap', 0) >= MIN_FINDING_REQUESTS:
@@ -1072,7 +1078,8 @@ def build_findings(report):
             f'nothing but the trap. Measured difference between the two '
             f'readings: {gap["gap"]:,} sampled requests the origin meant to '
             f'block that a non-merging crawler fetches anyway.',
-            {'host': host, **gap}))
+            {'host': host, **gap},
+            impact=f'{gap["gap"]:,} sampled requests read differently'))
 
     # `served` is present-but-None whenever nothing was fetched — which is the
     # normal path, because a pasted file short-circuits the fetch entirely.
@@ -1088,7 +1095,8 @@ def build_findings(report):
             'logs for `/robots.txt` before concluding the file is broken. The '
             'before/after numbers here were measured against an empty rule set '
             'and understate what the current file does.',
-            {'host': host, **(report.get('served') or {})}))
+            {'host': host, **(report.get('served') or {})},
+            impact='current-file figures understated'))
 
     if (ceiling.get('request_share') or 0) >= 0.05:
         out.append(_finding(
@@ -1100,7 +1108,8 @@ def build_findings(report):
             f'so these are untouched by any crawl rule — they are browser-UA '
             f'clients, feed readers, and crawlers that spoof a browser. Caching '
             f'and rate limiting are the levers that reach them.',
-            {'host': host, **ceiling}))
+            {'host': host, **ceiling},
+            impact=f'{ceiling.get("matched", 0):,} requests no crawl rule can reach'))
     return out
 
 
@@ -1213,9 +1222,13 @@ def build_report(store, summary=None, *, dates=None, scale=None, host=None,
 
     served = None
     fetched = None
+    # Where the baseline came from decides how much the before/after figures
+    # are worth, so it is recorded rather than inferred from what is present.
+    text_source = 'pasted' if current_text is not None else None
     if current_text is None and fetcher is not None:
         fetched = fetcher(host, check_host=check_host)
         current_text = fetched.get('text')
+        text_source = 'fetched' if current_text is not None else None
     if current_text is not None:
         served = describe_served(
             current_text,
@@ -1253,6 +1266,7 @@ def build_report(store, summary=None, *, dates=None, scale=None, host=None,
         'served': served,
         'fetch_error': (fetched or {}).get('error'),
         'current_text': current_text,
+        'current_text_source': text_source,
         'file': final,
         'scale': scale,
     }

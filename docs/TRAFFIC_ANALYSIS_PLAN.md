@@ -20,7 +20,7 @@ sibling of the profiler, not an extension of it.
 | 3 | Cache analysis over a pull (revalidation ratio, repeat-fetch) + live header audit | **done** |
 | 4 | Crawler analysis (classification, IP verification, URL-space cross-tab) | **done** |
 | 5 | robots.txt proposal engine with measured before/after | **done** |
-| 6 | Customer-facing report + downloadable artifacts | planned |
+| 6 | Customer-facing report + downloadable artifacts | **done** |
 
 Phases 3 and 4 are independent and each useful alone.
 
@@ -355,11 +355,33 @@ Reference implementations to port, read-only:
 
 ### 7.4 Deliverables
 
-- In-portal report view.
+- In-portal report view. `GET /traffic/<id>/report`.
 - **Download robots.txt** — with measured impact in the header comment, as in
   `icc-swarm-30d/www.iccsafe.org.robots.txt.suggested`.
 - **Export standalone HTML** — the self-contained format already shipped to
-  customers in `/home/admin/waas-log-reports/`.
+  customers in `/home/admin/waas-log-reports/`. `GET /traffic/<id>/report.html`.
+
+**As built.** `app/logpull/report.py` assembles one document from whichever
+layers have run; the two templates share that document and nothing else, which
+is the right seam — the in-portal view wants Bootstrap and links back to the
+evidence tables, the export has to open on a laptop with no network. Three
+rules the module enforces, each of which is a way a report can mislead without
+containing a false sentence:
+
+- **Sections are never summed.** The cache layer counts a crawler fetching an
+  uncacheable asset; so does the robots layer. A combined "total recoverable"
+  headline would double-count while looking more authoritative than any
+  measured number under it. The overlap is stated on every report instead.
+- **"Not run" is not "nothing found."** A layer that never ran is listed as
+  missing with instructions. An empty section reads as a clean bill of health.
+- **Limits are generated, not boilerplate** — from this pull's sampling
+  factor, truncated windows, capped tables, unavailable crawler range lists,
+  challenged probes, budget exhaustion and robots baseline provenance.
+
+Severity stays at the producers' two rungs. `impact` — the one measured figure
+per finding that the summary table shows — is built where the evidence is
+built, and is optional, because not every finding has one honest number and an
+invented one is worse than a blank cell.
 
 ---
 

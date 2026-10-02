@@ -755,6 +755,8 @@ def _volume_finding(data):
         'with caching.',
         {'requests': data['crawler_requests'], 'share': share,
          'byte_share': byte_share},
+        impact=f'{data["crawler_requests"]:,} requests ({_pct(share)}), '
+               f'{_pct(byte_share)} of egress',
     ), category=CATEGORY_ROBOTS)]
 
 
@@ -784,6 +786,8 @@ def _impostor_findings(data):
         {'crawlers': [{'label': c['label'], 'impostor': c['impostor'],
                        'share': c['impostor_share'],
                        'top_ips': c['top_impostor_ips']} for c in offenders]},
+        impact=f'{sum(c["impostor"] for c in offenders):,} requests from outside '
+               f'published ranges',
     ), category=CATEGORY_WAAS)]
 
 
@@ -817,6 +821,7 @@ def _category_findings(data):
             'decision rather than a default.',
             {'requests': ai['requests'], 'bytes': ai['bytes'],
              'share_of_crawl': ai['share_of_crawl']},
+            impact=f'{ai["requests"]:,} requests, {_bytes_label(ai["bytes"])}',
         ), category=CATEGORY_ROBOTS))
 
     seo = by_category.get(CAT_SEO)
@@ -833,6 +838,7 @@ def _category_findings(data):
             'robots.txt.',
             {'requests': seo['requests'], 'bytes': seo['bytes'],
              'share_of_crawl': seo['share_of_crawl']},
+            impact=f'{seo["requests"]:,} requests, {_bytes_label(seo["bytes"])}',
         ), category=CATEGORY_ROBOTS))
     return out
 
@@ -873,6 +879,8 @@ def _query_trap_findings(data):
         {'crawlers': [{'label': c['label'], 'query_share': c['query_share'],
                        'requests': c['requests']} for c in traps],
          'keys': keys},
+        impact=f'{len(traps)} crawler(s) over {_pct(QUERY_TRAP_SHARE)} '
+               f'parameterised URLs',
     ), category=CATEGORY_ROBOTS)]
 
 
@@ -895,6 +903,8 @@ def _url_space_findings(data):
         'disallow: the measured cost is real and the measured benefit is '
         'close to zero.',
         {'prefixes': hot},
+        impact=f'{sum(r["crawler_requests"] for r in hot):,} crawler requests '
+               f'across {len(hot)} prefix(es)',
     ), category=CATEGORY_ROBOTS)]
 
 

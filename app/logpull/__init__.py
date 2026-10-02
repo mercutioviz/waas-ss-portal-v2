@@ -12,12 +12,15 @@ Modules:
     crawlers     — crawler classification and published-IP-range verification
     header_audit — live three-probe conditional replay against the origin
     robots       — robots.txt proposal engine, measured by replay
+    report       — customer-facing assembly over the above, split by who acts
 
 See docs/TRAFFIC_ANALYSIS_PLAN.md for the design and its constraints.
 """
 from app.logpull.analysis import CacheAggregator, analyze_pull
 from app.logpull.crawlers import CrawlerAggregator, classify_ua, load_ranges
 from app.logpull.preflight import estimate, format_duration, preflight
+from app.logpull.report import SECTIONS
+from app.logpull.report import build as build_report
 from app.logpull.robots import (
     Replay,
     Robots,
@@ -57,7 +60,9 @@ __all__ = [
     'MODE_FULL',
     'MODE_SAMPLE',
     'PullStore',
+    'SECTIONS',
     'Window',
+    'build_report',
     'corpus_bytes',
     'corpus_root',
     'drain',

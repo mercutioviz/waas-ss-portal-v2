@@ -13,6 +13,8 @@
     POST /traffic/<id>/audit            — live header audit of the busiest assets
     POST /traffic/<id>/robots           — generate and measure a robots.txt proposal
     GET  /traffic/<id>/robots.txt       — download the measured file
+    GET  /traffic/<id>/report           — customer-facing report, split by owner
+    GET  /traffic/<id>/report.html      — the same report as a self-contained download
 
 Only one pull runs at a time. The portal is a single gevent worker, so two
 concurrent multi-hour pulls would contend for one event loop and make the
@@ -41,7 +43,7 @@ from app.background_tasks import (
     run_log_pull_analysis,
     run_robots_proposal,
 )
-from app.logpull import corpus_bytes, preflight
+from app.logpull import corpus_bytes, preflight, report as report_builder
 from app.logpull.preflight import MAX_TOTAL_BYTES, format_duration
 from app.logpull.source import LogSource
 from app.logpull.store import PullStore
@@ -544,3 +546,82 @@ def robots_download(pull_id):
         text, mimetype='text/plain; charset=utf-8',
         headers={'Content-Disposition':
                  f'attachment; filename="{safe}.robots.txt"'})
+
+
+def _report_document(pull):
+    """Assemble the report for a pull.
+
+    Built on every request rather than cached on the row, because the three
+    analyses that feed it are each re-runnable on their own. A stored document
+    would go stale the moment someone re-ran the header audit, and a report
+    that silently describes an earlier audit is worse than one that takes a
+    few milliseconds to assemble.
+    """
+    summary = pull.result or {}
+    stored = pull.report or {}
+    meta = {
+        'pull_id': pull.id,
+        'app_name': pull.app_name,
+        'app_id': pull.app_id,
+        'account_name': pull.account.account_name if pull.account else None,
+        'mode': pull.mode,
+        'window_days': pull.window_days,
+        'period_start': datetime.fromtimestamp(pull.range_start, timezone.utc),
+        'period_end': datetime.fromtimestamp(pull.range_end, timezone.utc),
+        'raw_deleted': pull.raw_deleted,
+        'generated_on': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
+    }
+    return report_builder.build(
+        meta,
+        analysis=summary.get('analysis') or {},
+        header_audit=stored.get('header_audit') or {},
+        robots=stored.get('robots') or {},
+    )
+
+
+@bp.route('/<int:pull_id>/report')
+@login_required
+def pull_report(pull_id):
+    pull = _get_pull_or_404(pull_id)
+    summary = pull.result or {}
+    stored = pull.report or {}
+    return render_template(
+        'traffic/report.html',
+        pull=pull,
+        doc=_report_document(pull),
+        analysis=summary.get('analysis') or {},
+        header_audit=stored.get('header_audit') or {},
+        robots=stored.get('robots') or {},
+    )
+
+
+@bp.route('/<int:pull_id>/report.html')
+@login_required
+def report_download(pull_id):
+    """The report as one self-contained file.
+
+    Rendered from a separate template rather than by scraping the in-portal
+    page: this one has to open with no network, so it carries its own CSS and
+    links to nothing. Sent as an attachment so a browser saves it instead of
+    rendering it in place — the point of the file is that it can be forwarded.
+    """
+    from flask import Response
+
+    pull = _get_pull_or_404(pull_id)
+    summary = pull.result or {}
+    stored = pull.report or {}
+    html = render_template(
+        'traffic/report_standalone.html',
+        pull=pull,
+        doc=_report_document(pull),
+        analysis=summary.get('analysis') or {},
+        header_audit=stored.get('header_audit') or {},
+        robots=stored.get('robots') or {},
+    )
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d')
+    safe = ''.join(c for c in (pull.app_name or 'app')
+                   if c.isalnum() or c in '.-_')[:100] or 'app'
+    return Response(
+        html, mimetype='text/html; charset=utf-8',
+        headers={'Content-Disposition':
+                 f'attachment; filename="{safe}-traffic-analysis-{stamp}.html"'})

@@ -1,0 +1,296 @@
+{#
+  Standalone traffic-reduction report.
+
+  Self-contained on purpose: no CDN, no scripts, no webfonts. This file gets
+  emailed to a customer, opened on a laptop with no network, forwarded to a
+  server team and printed. Anything loaded from elsewhere is a section that
+  renders blank in at least one of those.
+#}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traffic Analysis &mdash; {{ doc.meta.app_name }}</title>
+<style>
+  :root{
+    --ink:#1a1d21; --muted:#5f6b7a; --line:#dfe3e8; --bg:#f6f7f9; --card:#fff;
+    --warn:#c0392b; --warnbg:#fdecea; --info:#1a6fb5; --infobg:#eaf3fb;
+    --good:#4a7c59; --goodbg:#edf5ef; --amber:#c77700; --amberbg:#fff6e5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1040px;margin:0 auto;padding:40px 24px 80px}
+  header{border-bottom:3px solid var(--ink);padding-bottom:20px;margin-bottom:28px}
+  h1{font-size:27px;margin:0 0 6px;letter-spacing:-.4px}
+  .sub{color:var(--muted);font-size:14px}
+  h2{font-size:20px;margin:46px 0 6px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+  h3{font-size:16.5px;margin:26px 0 6px}
+  h4{font-size:13px;margin:26px 0 6px;color:var(--muted);
+     text-transform:uppercase;letter-spacing:.5px}
+  .owner{color:var(--muted);font-size:13px;margin:0 0 4px;
+         text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+  .blurb{color:var(--muted);font-size:14px;margin:0 0 6px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:22px 0}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:15px 17px}
+  .kpi .n{font-size:25px;font-weight:650;letter-spacing:-.5px;line-height:1.2}
+  .kpi .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:5px}
+  .kpi .x{font-size:12px;color:var(--muted);margin-top:3px}
+  .kpi.bad .n{color:var(--warn)} .kpi.good .n{color:var(--good)} .kpi.warn .n{color:var(--amber)}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px;background:var(--card)}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f2f5;font-weight:600;font-size:12.5px;text-transform:uppercase;
+     letter-spacing:.4px;color:var(--muted)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  code,pre{font-family:"SF Mono",Menlo,Consolas,monospace}
+  code{background:#eef0f3;padding:1.5px 5px;border-radius:3px;font-size:12.8px}
+  pre{background:#1f2429;color:#e6e6e6;padding:14px 16px;border-radius:6px;
+      overflow-x:auto;font-size:12.5px;line-height:1.55;white-space:pre-wrap}
+  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.6px;
+       padding:3px 9px;border-radius:11px;text-transform:uppercase;white-space:nowrap}
+  .t-warning{background:var(--warnbg);color:var(--warn)}
+  .t-info{background:var(--infobg);color:var(--info)}
+  .finding{border-left:4px solid var(--line);padding-left:18px;margin:26px 0}
+  .f-warning{border-left-color:var(--warn)} .f-info{border-left-color:var(--info)}
+  .detail{white-space:pre-line;margin:6px 0 0}
+  .impact{font-size:13.5px;color:var(--muted);margin:2px 0 0;font-variant-numeric:tabular-nums}
+  .note{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--info);
+        padding:13px 17px;margin:16px 0;border-radius:0 6px 6px 0;font-size:14px}
+  .note.warn{border-left-color:var(--amber);background:var(--amberbg)}
+  .empty{color:var(--muted);font-style:italic;margin:10px 0}
+  ul,ol{padding-left:22px} li{margin:7px 0}
+  .muted{color:var(--muted)} .small{font-size:13px}
+  footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);
+         color:var(--muted);font-size:12.5px}
+  @media print{body{background:#fff}.wrap{max-width:none;padding:0}
+               .kpi,.finding,table{break-inside:avoid}
+               h2{break-after:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Traffic Analysis &mdash; <code>{{ doc.meta.app_name }}</code></h1>
+  <div class="sub">
+    {% if doc.meta.account_name %}{{ doc.meta.account_name }} &middot; {% endif %}
+    {{ doc.meta.period_start.strftime('%Y-%m-%d') }} &rarr; {{ doc.meta.period_end.strftime('%Y-%m-%d') }} UTC
+    &middot; {{ doc.meta.window_days }}-day window, {{ doc.meta.mode }} collection
+    &middot; generated {{ doc.meta.generated_on }}
+  </div>
+</header>
+
+{% if doc.headline %}
+<div class="kpis">
+  {% for k in doc.headline %}
+  <div class="kpi {{ k.tone }}">
+    <div class="n">{{ k.value }}</div>
+    <div class="l">{{ k.label }}</div>
+    {% if k.note %}<div class="x">{{ k.note }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if doc.missing %}
+<div class="note warn">
+  <strong>Not everything was measured.</strong>
+  These analyses have not been run against this collection, so nothing below
+  describes what they would have found. An absent section is not a clean
+  result.
+  <ul>
+    {% for m in doc.missing %}
+    <li><strong>{{ m.what }}</strong> &mdash; {{ m.why }} <span class="muted">{{ m.how }}</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<h2>What was found</h2>
+{% if doc.summary %}
+<p class="blurb">
+  {{ doc.counts.warning }} item(s) need attention, {{ doc.counts.info }} for
+  information. Ordered by severity, then by who acts.
+</p>
+<table>
+  <thead>
+    <tr>
+      <th class="num">#</th>
+      <th>Finding</th>
+      <th>Measured</th>
+      <th>Owner</th>
+      <th>Severity</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in doc.summary %}
+    <tr>
+      <td class="num">{{ loop.index }}</td>
+      <td>{{ f.title }}</td>
+      <td class="muted small">{{ f.impact or '—' }}</td>
+      <td class="small">{{ doc.section_labels.get(f.category, f.category) }}</td>
+      <td><span class="tag t-{{ f.severity }}">{{ doc.severity_labels.get(f.severity, f.severity) }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No findings were produced. Check the list above for analyses
+that have not been run &mdash; if all of them have, this collection showed no
+pattern over the reporting thresholds.</p>
+{% endif %}
+
+{% for section in doc.sections %}
+<h2>{{ section.label }}</h2>
+<p class="owner">{{ section.owner }}</p>
+<p class="blurb">{{ section.blurb }}</p>
+
+{% if section.findings %}
+  {% for f in section.findings %}
+  <div class="finding f-{{ f.severity }}">
+    <h3>{{ f.title }} <span class="tag t-{{ f.severity }}">{{ doc.severity_labels.get(f.severity, f.severity) }}</span></h3>
+    {% if f.impact %}<p class="impact">Measured: {{ f.impact }} &middot; <span class="muted">source: {{ f.source }}</span></p>
+    {% else %}<p class="impact muted">Source: {{ f.source }}</p>{% endif %}
+    <p class="detail">{{ f.detail }}</p>
+  </div>
+  {% endfor %}
+{% else %}
+<p class="empty">Nothing in this category crossed a reporting threshold.</p>
+{% endif %}
+
+{# The proposed file belongs inside the section whose owner has to deploy it. #}
+{% if section.key == 'robots' and doc.robots_file %}
+<h4>Proposed robots.txt for {{ doc.robots_host }}</h4>
+<p class="small muted">
+  Every figure in this file's header comment was measured by replaying this
+  exact text against the collected rows. Save it as <code>/robots.txt</code> in
+  that host's document root.
+</p>
+<pre>{{ doc.robots_file }}</pre>
+{% endif %}
+{% endfor %}
+
+<h2>Evidence</h2>
+
+{% set hosts = (analysis or {}).get('hosts') or [] %}
+{% if hosts|length > 1 %}
+<h4>Traffic by host</h4>
+<table>
+  <thead><tr><th>Host</th><th class="num">Requests</th><th class="num">Share</th>
+    <th class="num">Bytes</th><th class="num">Share</th><th class="num">Skew</th></tr></thead>
+  <tbody>
+    {% for row in hosts %}
+    <tr>
+      <td><code>{{ row.host or '(none)' }}</code></td>
+      <td class="num">{{ '{:,}'.format(row.requests) }}</td>
+      <td class="num">{% if row.request_share is not none %}{{ '%.1f'|format(row.request_share * 100) }}%{% else %}—{% endif %}</td>
+      <td class="num">{{ row.bytes | filesizeformat }}</td>
+      <td class="num">{% if row.byte_share is not none %}{{ '%.1f'|format(row.byte_share * 100) }}%{% else %}—{% endif %}</td>
+      <td class="num">{% if row.skew %}{{ '%.1f'|format(row.skew) }}&times;{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% set crawlers = (analysis or {}).get('crawlers') or {} %}
+{% if crawlers.get('crawlers') %}
+<h4>Declared crawlers</h4>
+<table>
+  <thead><tr><th>Crawler</th><th>Kind</th><th class="num">Requests</th>
+    <th class="num">Bytes</th><th>Verification</th></tr></thead>
+  <tbody>
+    {% for c in crawlers['crawlers'][:15] %}
+    <tr>
+      <td><code>{{ c.label }}</code></td>
+      <td class="small muted">{{ c.category_label }}</td>
+      <td class="num">{{ '{:,}'.format(c.requests) }}</td>
+      <td class="num">{{ c.bytes | filesizeformat }}</td>
+      <td class="small">
+        {% if c.verification == 'published_list' %}
+          {% if c.impostor %}{{ '{:,}'.format(c.impostor) }} from outside published ranges
+          {% else %}verified against published ranges{% endif %}
+        {% else %}no published range list &mdash; unverifiable{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">
+  Verification is IP-prefix containment against the operator's own published
+  list, never a substring match on the user-agent. A crawler whose operator
+  publishes no list is reported as unverifiable, which is not the same as fake.
+</p>
+{% endif %}
+
+{% set measured = (robots or {}).get('measurement') or {} %}
+{% if measured.get('by_crawler') %}
+<h4>Effect of the proposed robots.txt, per crawler</h4>
+<table>
+  <thead><tr><th>Crawler</th><th class="num">Requests</th>
+    <th class="num">Newly blocked</th><th class="num">Share</th></tr></thead>
+  <tbody>
+    {% for c in measured['by_crawler'][:15] %}
+    <tr>
+      <td><code>{{ c.label }}</code></td>
+      <td class="num">{{ '{:,}'.format(c.requests) }}</td>
+      <td class="num">{{ '{:,}'.format(c.newly_blocked) }}</td>
+      <td class="num">{{ '%.1f'|format((c.share_blocked or 0) * 100) }}%</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">
+  Split by crawler because a file can look effective overall while barely
+  touching the one crawler that matters most to you.
+</p>
+{% endif %}
+
+{% set assets = (header_audit or {}).get('assets') or [] %}
+{% if assets %}
+<h4>Live header probes</h4>
+<table>
+  <thead><tr><th>Asset</th><th>Cache-Control</th><th>ETag</th><th>Verdict</th></tr></thead>
+  <tbody>
+    {% for a in assets[:20] %}
+    <tr>
+      <td class="small"><code>{{ a.host }}{{ a.url }}</code></td>
+      <td class="small">{{ a.cache_control or '—' }}</td>
+      <td class="small">{{ a.etag or '—' }}</td>
+      <td class="small">{{ doc.verdict_labels.get(a.verdict, a.verdict) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">
+  Each asset was probed three times &mdash; once unconditionally, once with
+  <code>If-None-Match</code> alone, once with <code>If-Modified-Since</code>
+  alone. A single probe carrying both validators cannot tell a broken ETag
+  apart from an origin that does not support conditional requests at all.
+</p>
+{% endif %}
+
+<h2>Method and known limits</h2>
+<p class="small">
+  All collection was read-only against the WaaS v4 logs API. The log pull works
+  around that API's 10,000-row pagination cap by bisecting time windows rather
+  than paging past it, which would silently truncate. Live probes, where they
+  were run, went to public endpoints only.
+</p>
+<ul class="small">
+  {% for limit in doc.limits %}<li>{{ limit }}</li>{% endfor %}
+</ul>
+
+<footer>
+  Generated {{ doc.meta.generated_on }} by the WaaS self-service portal
+  &middot; analysis #{{ doc.meta.pull_id }}
+  {% if doc.meta.account_name %}&middot; account {{ doc.meta.account_name }}{% endif %}
+  &middot; application {{ doc.meta.app_name }}
+  &middot; period {{ doc.meta.period_start.strftime('%Y-%m-%d') }} &rarr;
+  {{ doc.meta.period_end.strftime('%Y-%m-%d') }} UTC
+</footer>
+
+</div>
+</body>
+</html>

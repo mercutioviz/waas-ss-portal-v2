@@ -532,8 +532,9 @@ def _status_classes(counter):
 # --- findings --------------------------------------------------------------
 
 
-def _cache_finding(code, severity, category, title, detail, evidence):
-    finding = _finding(code, severity, title, detail, evidence)
+def _cache_finding(code, severity, category, title, detail, evidence,
+                   impact=None):
+    finding = _finding(code, severity, title, detail, evidence, impact=impact)
     finding['category'] = category
     return finding
 
@@ -577,6 +578,7 @@ def _edge_findings(data):
         'badly tuned still hits sometimes. Check the application\'s CDN/caching '
         'settings before changing anything at the origin.',
         {'static_total': total, 'static_hits': 0},
+        impact=f'0 of {total:,} static requests cached at the edge',
     )]
 
 
@@ -605,6 +607,8 @@ def _revalidation_findings(data):
          'static_ratio': reval['static_ratio'],
          'static_full': reval['static_full'],
          'static_revalidated': reval['static_revalidated']},
+        impact=f'.{worst["extension"]} revalidates {_pct(worst["ratio"] or 0)}; '
+               f'{reval["static_full"]:,} full bodies resent',
     )]
 
 
@@ -636,6 +640,8 @@ def _repeat_findings(data):
          'extrapolated_requests': extrapolated,
          'extrapolated_bytes': repeat['extrapolated_bytes'],
          'top': repeat['top']},
+        impact=f'{repeat["excess_requests"]:,} redundant fetches '
+               f'({_pct(share)} of static traffic)',
     )]
 
 
@@ -659,6 +665,8 @@ def _host_findings(data):
         'change scoped to that host moves the bandwidth bill further than a change '
         'applied evenly across all of them.',
         {'hosts': skewed[:5], 'host_count': data['host_count']},
+        impact=f'{worst["host"]}: {_pct(worst["request_share"] or 0)} of requests, '
+               f'{_pct(worst["byte_share"] or 0)} of bytes',
     )]
 
 
@@ -676,6 +684,7 @@ def _not_found_findings(data):
         'listed here instead: a 404 served repeatedly is usually a stale reference in '
         'a page or a crawler walking URLs that were never real.',
         {'rows': not_found['rows'], 'share': share, 'top': not_found['top']},
+        impact=f'{not_found["rows"]:,} requests ({_pct(share)})',
     )]
 
 
