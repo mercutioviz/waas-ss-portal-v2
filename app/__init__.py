@@ -308,6 +308,7 @@ def create_app(config_name='default'):
         from app.background_tasks import (
             run_site_profile_cleanup, capture_security_metrics, run_security_metric_cleanup,
             reconcile_interrupted_pulls, run_log_pull_cleanup,
+            run_traffic_hint_cleanup,
         )
         from app.report_service import run_scheduled_reports
 
@@ -337,7 +338,11 @@ def create_app(config_name='default'):
         def _cleanup_security_metrics_job():
             run_security_metric_cleanup(app)
 
-        # 3:57 keeps the spacing of the two sweeps above.
+        @scheduler.task('cron', id='cleanup_traffic_hints', hour=3, minute=47, misfire_grace_time=3600)
+        def _cleanup_traffic_hints_job():
+            run_traffic_hint_cleanup(app)
+
+        # 3:57 keeps the spacing of the sweeps above.
         @scheduler.task('cron', id='cleanup_log_pulls', hour=3, minute=57, misfire_grace_time=3600)
         def _cleanup_log_pulls_job():
             run_log_pull_cleanup(app)

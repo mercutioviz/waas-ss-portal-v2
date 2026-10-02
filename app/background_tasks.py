@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 SITE_PROFILE_RETENTION_DAYS = 30
 SECURITY_METRIC_RETENTION_DAYS = 90
 SECURITY_METRIC_QUICK_RANGE = 'r_1h'
+#: Traffic hints go stale long before this (see app.traffic_hints.TTL_SECONDS);
+#: this is only how long an unvisited row is kept before being swept.
+TRAFFIC_HINT_RETENTION_DAYS = 7
 
 
 def run_bulk_operation(session_id, items, operation_func, name='Bulk operation'):
@@ -369,6 +372,26 @@ def run_security_metric_cleanup(app) -> int:
         db.session.commit()
         logger.info(f'Security metric cleanup: deleted {deleted} row(s) older than '
                     f'{SECURITY_METRIC_RETENTION_DAYS} days.')
+        return deleted
+
+
+def run_traffic_hint_cleanup(app) -> int:
+    """Delete AppTrafficSnapshot rows older than TRAFFIC_HINT_RETENTION_DAYS.
+
+    These are a cache, not a history, and they are refreshed in place while an
+    app is being looked at. This sweep exists only to collect rows for apps
+    that have been deleted or accounts nobody visits any more — without it the
+    table grows by one row per app ever listed and never shrinks.
+    """
+    from app.models import AppTrafficSnapshot
+
+    with app.app_context():
+        cutoff = datetime.utcnow() - timedelta(days=TRAFFIC_HINT_RETENTION_DAYS)
+        deleted = AppTrafficSnapshot.query.filter(AppTrafficSnapshot.captured_at < cutoff) \
+            .delete(synchronize_session=False)
+        db.session.commit()
+        logger.info(f'Traffic hint cleanup: deleted {deleted} row(s) older than '
+                    f'{TRAFFIC_HINT_RETENTION_DAYS} days.')
         return deleted
 
 

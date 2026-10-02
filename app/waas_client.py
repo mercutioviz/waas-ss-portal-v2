@@ -677,6 +677,53 @@ class WaasClient:
         """Get audit/system logs"""
         return self._make_request('GET', '/logs/audit/', params=params)
 
+    # === Reports (v2) ===
+    def get_bandwidth_summary(self, quick_range='r_30d', app_ids=None):
+        """Per-application bandwidth for the whole account in one v2 call.
+
+        The v4 API has no per-application traffic statistics at all — its only
+        usage endpoint, ``/fup_usage/``, is account-scoped and its response
+        schema carries no application field. This v2 report is the only source
+        of per-app bandwidth, and it returns every app in a single request.
+
+        Returns the raw response; the rows live under
+        ``['data']['bandwidth_data']`` as::
+
+            {"app_id": 27321, "metered_bytes": 7608701171, "name": "...",
+             "app_total_sum": 1.52, "app_out_sum": 5.59,
+             "app_good_sum": 1.5, "app_bad_sum": 0.03,
+             "total_out_included_sum": 7.11}
+
+        Three things about that payload will produce wrong numbers if taken
+        at face value:
+
+        - **Use ``metered_bytes``.** It is an integer count of bytes and it is
+          scoped to the requested window (measured on one app: 10,773,089 at
+          ``r_1h`` rising to 7,608,701,171 at ``r_30d``).
+        - **The ``*_sum`` floats are not in fixed units.** They are expressed
+          in whatever ``data['data_points_unit']`` says, which switches with
+          the range — the same app reads ``app_total_sum`` 386.54 at ``r_7d``
+          (MB) and 1.52 at ``r_30d`` (GB). Only ratios between them, such as
+          ``app_bad_sum / app_total_sum``, are safe to use unconverted.
+        - **30 days is the ceiling.** ``r_45d``, ``r_60d`` and ``r_90d`` are
+          listed in the API's own enum but return HTTP 500.
+
+        ``app_ids`` is a comma-separated string of bare integers. A list in
+        brackets returns 500, and an id the account cannot see returns 404.
+
+        Requires v2 credentials on the account: a v4 API key presented as
+        ``auth-api`` is rejected with ``{"errors": "Invalid token"}``.
+
+        Args:
+            quick_range: One of r_1h, r_3h, r_24h, r_7d, r_14d, r_30d.
+            app_ids: Optional comma-separated app ids to restrict the report.
+        """
+        params = {'quickRange': quick_range, 'timezoneOffset': '0'}
+        if app_ids:
+            params['app_ids'] = app_ids
+        return self._make_request('GET', '/report/bandwidth_summary/',
+                                  params=params, api_version='v2')
+
     # === Applications (v2) ===
     def list_applications_v2(self):
         """List all applications via v2 API.

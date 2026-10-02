@@ -930,6 +930,63 @@ class SecurityMetricSnapshot(db.Model):
             'top_urls': self.top_urls,
         }
 
+
+class AppTrafficSnapshot(db.Model):
+    """Cached traffic volume for one application, shown as a hint on the
+    application list so a user can see which apps are worth analysing.
+
+    Unlike SecurityMetricSnapshot above — which this otherwise mirrors — this
+    is a cache and not a history. There is one row per
+    (account, app, window) and it is refreshed in place, because nothing here
+    is plotted over time; it exists only to avoid re-querying the API on
+    every page load.
+
+    The two measures come from different APIs with different credential
+    requirements, which is why they are independently nullable:
+
+    - ``requests`` is an exact count from the v4 logs API and is available on
+      any account.
+    - ``metered_bytes`` and ``bad_share`` come from the v2 bandwidth report,
+      which needs v2 email/password credentials. On an API-key-only account
+      they stay None, and the UI shows a dash rather than a zero — an
+      unmeasured value and a measured zero are not the same claim.
+    """
+    __tablename__ = 'app_traffic_snapshots'
+    __table_args__ = (
+        db.UniqueConstraint('account_id', 'app_name', 'window_days',
+                            name='uq_app_traffic_snapshot_scope'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('waas_accounts.id', ondelete='CASCADE'),
+                           nullable=False, index=True)
+    app_name = db.Column(db.String(255), nullable=False, index=True)
+    window_days = db.Column(db.Integer, nullable=False, default=30)
+    captured_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    requests = db.Column(db.Integer, nullable=True)
+    metered_bytes = db.Column(db.BigInteger, nullable=True)
+    bad_share = db.Column(db.Float, nullable=True)
+    #: Why the request count is missing, when it is. Distinguishes an app whose
+    #: count failed from one that was simply never asked about.
+    error = db.Column(db.String(255), nullable=True)
+
+    account = db.relationship('WaasAccount', backref=db.backref('app_traffic_snapshots', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<AppTrafficSnapshot {self.id}: {self.app_name} @ {self.captured_at}>'
+
+    def to_dict(self):
+        return {
+            'app_name': self.app_name,
+            'window_days': self.window_days,
+            'captured_at': self.captured_at.isoformat() if self.captured_at else None,
+            'requests': self.requests,
+            'metered_bytes': self.metered_bytes,
+            'bad_share': self.bad_share,
+            'error': self.error,
+        }
+
+
 class LogPull(db.Model):
     """A log-collection job for the traffic reduction analysis feature.
 

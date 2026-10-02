@@ -20,6 +20,7 @@ from app.validation_schemas import (
     ENDPOINT_TLS_FIELDS, ENDPOINT_PORT_FIELDS, SECURITY_SECTION_SCHEMAS,
     BULK_SECURITY_ACTIONS,
 )
+from app import traffic_hints
 from app.security_dashboard import aggregate_waf_logs
 from app.routes.logs import QUICK_RANGES
 from app.fp_scoring import group_waf_logs
@@ -160,7 +161,8 @@ def list_applications():
         api_version=api_version,
         error=error,
         list_curl=list_curl,
-        protection_modes=protection_modes
+        protection_modes=protection_modes,
+        max_hint_batch=traffic_hints.MAX_COUNT_BATCH,
     )
 
 
@@ -708,6 +710,84 @@ def security_dashboard_trend(account_id, app_id):
             for s in snapshots
         ],
     })
+
+
+# ---- Traffic hints on the application list ----
+#
+# Two endpoints rather than one because the measures have different shapes and
+# different credential requirements: bandwidth arrives for every app in a
+# single call, request counts cost one call each. Splitting them lets the
+# whole egress column paint in about a second while the counts trickle in,
+# and lets an account without v2 credentials get a clean "unavailable" for
+# bandwidth instead of a half-failed combined payload.
+
+@bp.route('/api/<int:account_id>/traffic-hints/bandwidth')
+@login_required
+def traffic_hints_bandwidth(account_id):
+    """Per-app egress and attack share for the whole account, in one v2 call."""
+    client, account, perm = get_client_for_account(account_id)
+    if not client:
+        return jsonify({'error': 'Account not found or inactive.'}), 404
+
+    if not account.has_v2_credentials:
+        return jsonify({
+            'available': False,
+            'reason': _('Bandwidth figures come from the v2 reporting API, '
+                        'which needs an email and password on this account. '
+                        'This account has an API key only.'),
+            'apps': {},
+        })
+
+    try:
+        measured = traffic_hints.fetch_bandwidth(client, account)
+    except WaasApiError as e:
+        return jsonify({'error': str(e)}), 502
+
+    stored = traffic_hints.upsert(account.id, measured)
+    return jsonify({
+        'available': True,
+        'window_days': traffic_hints.WINDOW_DAYS,
+        'apps': {name: {'metered_bytes': row.get('metered_bytes'),
+                        'bad_share': row.get('bad_share')}
+                 for name, row in stored.items()},
+    })
+
+
+@bp.route('/api/<int:account_id>/traffic-hints/requests')
+@login_required
+def traffic_hints_requests(account_id):
+    """Exact 30-day request counts for the named apps. Cache-first.
+
+    Capped at MAX_COUNT_BATCH apps per call — each count is a live API request,
+    so the cap is what keeps any one response well inside gunicorn's worker
+    timeout and lets the caller fill the table progressively.
+    """
+    client, account, perm = get_client_for_account(account_id)
+    if not client:
+        return jsonify({'error': 'Account not found or inactive.'}), 404
+
+    requested = [name for name in
+                 (request.args.get('apps', '').split(',')) if name.strip()]
+    requested = [name.strip() for name in requested][:traffic_hints.MAX_COUNT_BATCH]
+    if not requested:
+        return jsonify({'apps': {}, 'window_days': traffic_hints.WINDOW_DAYS})
+
+    cached = traffic_hints.load_cached(account.id, requested)
+    out = {name: {'requests': row.get('requests'), 'error': row.get('error')}
+           for name, row in cached.items()
+           if row.get('requests') is not None or row.get('error')}
+
+    pending = [name for name in requested if name not in out]
+    if pending:
+        counted = traffic_hints.fetch_counts(client, pending)
+        stored = traffic_hints.upsert(account.id, {
+            name: {'requests': count, 'error': error}
+            for name, (count, error) in counted.items()
+        })
+        for name, row in stored.items():
+            out[name] = {'requests': row.get('requests'), 'error': row.get('error')}
+
+    return jsonify({'apps': out, 'window_days': traffic_hints.WINDOW_DAYS})
 
 
 # ---- Phase 8: Configuration Editing & Bulk Operations ----

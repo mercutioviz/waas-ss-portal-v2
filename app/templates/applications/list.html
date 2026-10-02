@@ -134,6 +134,9 @@
                             <th class="d-none d-md-table-cell">{{ _('Servers') }}</th>
                             {% endif %}
                             <th class="d-none d-md-table-cell">{{ _('Block Mode') }}</th>
+                            <th class="d-none d-xl-table-cell text-end" title="{{ _('Exact request count over the last 30 days.') }}">{{ _('Requests 30d') }}</th>
+                            <th class="d-none d-xl-table-cell text-end" id="egressHeader" title="{{ _('Bytes served over the last 30 days.') }}">{{ _('Egress 30d') }}</th>
+                            <th class="d-none d-xl-table-cell text-end" title="{{ _('Share of this app\'s traffic classified as attack traffic.') }}">{{ _('Attack') }}</th>
                             <th>{{ _('Actions') }}</th>
                         </tr>
                     </thead>
@@ -192,6 +195,15 @@
                                 {% else %}
                                 <span class="text-muted">{{ _('N/A') }}</span>
                                 {% endif %}
+                            </td>
+                            <td class="d-none d-xl-table-cell text-end hint-requests" data-app-name="{{ app_name }}">
+                                <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
+                            </td>
+                            <td class="d-none d-xl-table-cell text-end hint-egress" data-app-name="{{ app_name }}">
+                                <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
+                            </td>
+                            <td class="d-none d-xl-table-cell text-end hint-attack" data-app-name="{{ app_name }}">
+                                <span class="spinner-border spinner-border-sm text-muted" role="status"></span>
                             </td>
                             <td>
                                 <div class="d-flex gap-1">
@@ -282,6 +294,125 @@
             window.location.href = '/applications/' + accountId + '/compare?apps=' + encodeURIComponent(sel[0]) + ',' + encodeURIComponent(sel[1]);
         }
     });
+})();
+</script>
+{% endif %}
+
+{% if selected_account and applications %}
+<script>
+// Traffic hints. The table is already rendered and usable before any of this
+// runs — these columns only answer "which app is worth looking at", so they
+// must never be on the critical path to seeing the list.
+(function() {
+    var accountId = {{ selected_account.id }};
+    var BATCH = {{ max_hint_batch }};
+
+    function cells(cls) {
+        var map = {};
+        document.querySelectorAll('td.' + cls + '[data-app-name]').forEach(function(td) {
+            var name = td.getAttribute('data-app-name');
+            (map[name] = map[name] || []).push(td);
+        });
+        return map;
+    }
+
+    var reqCells = cells('hint-requests');
+    var egrCells = cells('hint-egress');
+    var atkCells = cells('hint-attack');
+
+    function set(map, name, html, title) {
+        (map[name] || []).forEach(function(td) {
+            td.innerHTML = html;
+            if (title) td.title = title;
+        });
+    }
+
+    function setAll(map, html) {
+        Object.keys(map).forEach(function(name) { set(map, name, html); });
+    }
+
+    var DASH = '<span class="text-muted">&mdash;</span>';
+
+    function fmtBytes(n) {
+        if (n === null || n === undefined) return DASH;
+        if (n >= 1e12) return (n / 1e12).toFixed(2) + ' TB';
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + ' GB';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB';
+        return Number(n).toLocaleString() + ' B';
+    }
+
+    // --- Bandwidth: one call, every app, lands in about a second ---------
+    fetch('/applications/api/' + accountId + '/traffic-hints/bandwidth')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.available) {
+                // Not an error. The data genuinely does not exist for this
+                // account, and saying so beats a row of silent dashes.
+                setAll(egrCells, DASH);
+                setAll(atkCells, DASH);
+                var h = document.getElementById('egressHeader');
+                if (h && data.reason) {
+                    h.title = data.reason;
+                    h.innerHTML += ' <i class="bi bi-info-circle text-muted"></i>';
+                }
+                return;
+            }
+            var apps = data.apps || {};
+            Object.keys(egrCells).forEach(function(name) {
+                var row = apps[name];
+                set(egrCells, name, row ? fmtBytes(row.metered_bytes) : DASH);
+                if (!row || row.bad_share === null || row.bad_share === undefined) {
+                    set(atkCells, name, DASH);
+                } else if (row.bad_share <= 0) {
+                    set(atkCells, name, '<span class="text-muted">0%</span>');
+                } else {
+                    var pct = (row.bad_share * 100).toFixed(row.bad_share < 0.01 ? 2 : 1) + '%';
+                    var cls = row.bad_share >= 0.05 ? 'text-danger fw-semibold'
+                            : row.bad_share >= 0.01 ? 'text-warning' : 'text-muted';
+                    set(atkCells, name, '<span class="' + cls + '">' + pct + '</span>');
+                }
+            });
+        })
+        .catch(function() { setAll(egrCells, DASH); setAll(atkCells, DASH); });
+
+    // --- Request counts: one call per app, so batched and sequential -----
+    // Sequential on purpose: a single gevent worker serves this portal, and
+    // firing 59 parallel fetches would queue them anyway while also hammering
+    // the upstream API.
+    var names = Object.keys(reqCells);
+    var batches = [];
+    for (var i = 0; i < names.length; i += BATCH) {
+        batches.push(names.slice(i, i + BATCH));
+    }
+
+    function runBatch(index) {
+        if (index >= batches.length) return;
+        var batch = batches[index];
+        var qs = batch.map(encodeURIComponent).join(',');
+        fetch('/applications/api/' + accountId + '/traffic-hints/requests?apps=' + qs)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var apps = (data && data.apps) || {};
+                batch.forEach(function(name) {
+                    var row = apps[name];
+                    if (row && row.requests !== null && row.requests !== undefined) {
+                        set(reqCells, name, Number(row.requests).toLocaleString());
+                    } else if (row && row.error) {
+                        set(reqCells, name,
+                            '<span class="text-muted"><i class="bi bi-exclamation-circle"></i></span>',
+                            row.error);
+                    } else {
+                        set(reqCells, name, DASH);
+                    }
+                });
+            })
+            .catch(function() {
+                batch.forEach(function(name) { set(reqCells, name, DASH); });
+            })
+            .then(function() { runBatch(index + 1); });
+    }
+
+    runBatch(0);
 })();
 </script>
 {% endif %}
