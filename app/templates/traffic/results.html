@@ -352,6 +352,204 @@
 </div>
 {% endif %}
 
+{% set crawlers = analysis.get('crawlers') or {} %}
+{% if crawlers.get('crawlers') or crawlers.get('other_crawlers', {}).get('requests') %}
+{% set verify_labels = {
+    'published_list': _('Checked against published IP ranges'),
+    'no_published_list': _('Operator publishes no IP range list'),
+    'list_unavailable': _('Range list could not be loaded')
+} %}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">{{ _('Crawler traffic') }}</h5></div>
+    <div class="card-body">
+        <div class="row text-center g-3 mb-4">
+            <div class="col-6 col-lg-3">
+                <div class="text-muted small">{{ _('Crawler requests') }}</div>
+                <div class="fs-4">
+                    {% if crawlers.get('crawler_request_share') is not none %}
+                        {{ '%.1f'|format(crawlers['crawler_request_share'] * 100) }}%
+                    {% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ '{:,}'.format(crawlers.get('crawler_requests', 0)) }} {{ _('sampled') }}</div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="text-muted small">{{ _('Crawler egress') }}</div>
+                <div class="fs-4">
+                    {% if crawlers.get('crawler_byte_share') is not none %}
+                        {{ '%.1f'|format(crawlers['crawler_byte_share'] * 100) }}%
+                    {% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ crawlers.get('crawler_bytes', 0) | filesizeformat }}</div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="text-muted small">{{ _('Extrapolated requests') }}</div>
+                <div class="fs-4">{{ '{:,}'.format(crawlers.get('extrapolated_crawler_requests', 0)) }}</div>
+                <div class="text-muted small">{{ _('over the full window') }}</div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="text-muted small">{{ _('Distinct crawlers') }}</div>
+                <div class="fs-4">{{ crawlers.get('crawlers', []) | length }}</div>
+                <div class="text-muted small">{{ _('identified') }}</div>
+            </div>
+        </div>
+
+        {% if crawlers.get('categories') %}
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            {% for c in crawlers['categories'] %}
+            <span class="badge bg-light text-dark border">
+                {{ c.label }}: {{ '{:,}'.format(c.requests) }}
+                {% if c.share_of_crawl %}({{ '%.0f'|format(c.share_of_crawl * 100) }}%){% endif %}
+            </span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Crawler') }}</th>
+                        <th>{{ _('Type') }}</th>
+                        <th class="text-end">{{ _('Requests') }}</th>
+                        <th class="text-end">{{ _('Bytes') }}</th>
+                        <th class="text-end">{{ _('With query') }}</th>
+                        <th>{{ _('Verification') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in crawlers.get('crawlers', []) %}
+                    <tr>
+                        <td><code class="small">{{ c.label }}</code></td>
+                        <td class="small text-muted">{{ c.category_label }}</td>
+                        <td class="text-end">{{ '{:,}'.format(c.requests) }}</td>
+                        <td class="text-end">{{ c.bytes | filesizeformat }}</td>
+                        <td class="text-end">
+                            {% if c.query_share is not none %}{{ '%.0f'|format(c.query_share * 100) }}%{% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="small">
+                            {% if c.verification == 'published_list' %}
+                                {% if c.impostor %}
+                                <span class="badge bg-danger-subtle text-danger-emphasis"
+                                      title="{{ verify_labels['published_list'] }}">
+                                    {{ _('%(n)s impostor', n='{:,}'.format(c.impostor)) }}
+                                </span>
+                                {% else %}
+                                <span class="badge bg-success-subtle text-success-emphasis"
+                                      title="{{ verify_labels['published_list'] }}">
+                                    {{ _('verified') }}
+                                </span>
+                                {% endif %}
+                            {% elif c.verification == 'list_unavailable' %}
+                            {# Not the same as publishing nothing: this one
+                               could have been checked and wasn't. #}
+                            <span class="badge bg-warning-subtle text-warning-emphasis"
+                                  title="{{ verify_labels['list_unavailable'] }}">
+                                {{ _('Not checked') }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted" title="{{ verify_labels['no_published_list'] }}">
+                                {{ _('No published list') }}
+                            </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if crawlers.get('other_crawlers', {}).get('requests') %}
+                    <tr class="table-light">
+                        <td colspan="2" class="small text-muted">
+                            {{ _('Other self-declared crawlers') }}
+                            {% for o in crawlers['other_crawlers'].get('top', [])[:4] %}
+                            <code class="small ms-1">{{ o.product }}</code>
+                            {% endfor %}
+                        </td>
+                        <td class="text-end">{{ '{:,}'.format(crawlers['other_crawlers']['requests']) }}</td>
+                        <td class="text-end">{{ crawlers['other_crawlers']['bytes'] | filesizeformat }}</td>
+                        <td colspan="2"></td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted small mb-0 mt-2">
+            {{ _('A User-Agent is a claim. Only Google, Bing, Apple and OpenAI
+                 publish IP ranges, so only those can be checked; everything
+                 else is counted as stated rather than being assumed genuine
+                 or assumed fake.') }}
+        </p>
+    </div>
+</div>
+{% endif %}
+
+{% if crawlers.get('url_space') %}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">{{ _('Crawler vs. human by URL space') }}</h5></div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Path prefix') }}</th>
+                        <th class="text-end">{{ _('Crawler') }}</th>
+                        <th class="text-end">{{ _('Human') }}</th>
+                        <th class="text-end">{{ _('Crawler share') }}</th>
+                        <th class="text-end">{{ _('Crawler bytes') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in crawlers['url_space'][:12] %}
+                    <tr>
+                        <td class="text-break"><code class="small">{{ row.prefix }}</code></td>
+                        <td class="text-end">{{ '{:,}'.format(row.crawler_requests) }}</td>
+                        <td class="text-end">{{ '{:,}'.format(row.human_requests) }}</td>
+                        <td class="text-end">
+                            {% if row.crawler_share is not none %}
+                                <span class="{% if row.crawler_share >= 0.8 %}text-warning-emphasis fw-semibold{% endif %}">
+                                    {{ '%.0f'|format(row.crawler_share * 100) }}%
+                                </span>
+                            {% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="text-end">{{ row.crawler_bytes | filesizeformat }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if crawlers.get('query_keys') %}
+        <h6 class="mt-4">{{ _('Query parameters crawlers follow') }}</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Parameter') }}</th>
+                        <th class="text-end">{{ _('Crawler') }}</th>
+                        <th class="text-end">{{ _('Human') }}</th>
+                        <th class="text-end">{{ _('Crawler share') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for q in crawlers['query_keys'][:10] %}
+                    <tr>
+                        <td><code class="small">?{{ q.key }}=</code></td>
+                        <td class="text-end">{{ '{:,}'.format(q.crawler_requests) }}</td>
+                        <td class="text-end">{{ '{:,}'.format(q.human_requests) }}</td>
+                        <td class="text-end">
+                            {% if q.crawler_share is not none %}{{ '%.0f'|format(q.crawler_share * 100) }}%{% else %}&mdash;{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        <p class="text-muted small mb-0 mt-2">
+            {{ _('A prefix with a high crawler share and few human requests is
+                 the cheapest thing to disallow — the cost is measured and the
+                 benefit being given up is close to zero.') }}
+        </p>
+    </div>
+</div>
+{% endif %}
+
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">{{ _('Origin cache headers') }}</h5>

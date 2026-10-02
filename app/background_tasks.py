@@ -478,6 +478,7 @@ def _analyze_collected(app, pull, summary, emit, store=None):
     throwing away hours of fetching.
     """
     from app.logpull.analysis import analyze_pull
+    from app.logpull.crawlers import ranges_cache_dir
     from app.logpull.store import PullStore
     from app.models import LogPull
 
@@ -496,7 +497,8 @@ def _analyze_collected(app, pull, summary, emit, store=None):
         emit({**pull.to_dict(), 'analysis_rows': rows})
 
     try:
-        return analyze_pull(store, summary, on_progress=on_progress)
+        return analyze_pull(store, summary, on_progress=on_progress,
+                            ranges_dir=ranges_cache_dir(app.instance_path))
     except Exception as e:  # noqa: BLE001 — never lose a completed collection
         logger.error(f'log pull {pull.id} analysis failed: {traceback.format_exc()}')
         return {'error': str(e)[:300]}

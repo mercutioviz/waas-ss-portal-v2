@@ -9,11 +9,13 @@ Modules:
     preflight    — exact pre-flight count, time/disk projection per mode
     store        — gzipped JSONL on disk, per-day checkpoints, reaping
     analysis     — streaming cache analysis over a completed pull
+    crawlers     — crawler classification and published-IP-range verification
     header_audit — live three-probe conditional replay against the origin
 
 See docs/TRAFFIC_ANALYSIS_PLAN.md for the design and its constraints.
 """
 from app.logpull.analysis import CacheAggregator, analyze_pull
+from app.logpull.crawlers import CrawlerAggregator, classify_ua, load_ranges
 from app.logpull.preflight import estimate, format_duration, preflight
 from app.logpull.source import LogSource
 from app.logpull.store import PullStore, corpus_bytes, corpus_root
@@ -33,8 +35,11 @@ __all__ = [
     'ACCESS_ONLY',
     'CacheAggregator',
     'Cancelled',
+    'CrawlerAggregator',
     'DrainStats',
     'analyze_pull',
+    'classify_ua',
+    'load_ranges',
     'LogSource',
     'MODE_FULL',
     'MODE_SAMPLE',

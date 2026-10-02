@@ -684,25 +684,45 @@ def _not_found_findings(data):
 
 def analyze_pull(store, summary=None, *, dates=None, scale=None,
                  on_progress=None, should_cancel=None,
-                 yield_every=YIELD_EVERY_ROWS, check_host=is_auditable_host):
+                 yield_every=YIELD_EVERY_ROWS, check_host=is_auditable_host,
+                 ranges_dir=None, crawler_verifier=None, ranges_meta=None):
     """Stream a pull's rows off disk and aggregate them.
 
     store: `PullStore` for the pull.
     summary: the collection summary the runner produced, used for the
         measured scale factor and the truncation flags.
     scale: override the measured factor (tests, re-analysis of a partial).
+    ranges_dir: where published crawler prefix lists are cached. Given one,
+        the lists are refreshed before the pass so crawler UAs can be checked
+        against them; without one, crawlers are still classified and counted
+        but every claim is reported as unverifiable.
+
+    Both aggregators are fed from a single pass. The corpus is the expensive
+    thing to read, and crawler classification needs the same rows the cache
+    metrics do.
 
     Yields to the gevent hub every `yield_every` rows. Without that, parsing
     a multi-million-row corpus blocks the single worker and the portal stops
     answering requests for everyone until it finishes.
     """
+    from app.logpull.crawlers import CrawlerAggregator, RangeVerifier, load_ranges
+
     summary = summary or {}
     if scale is None:
         scale = summary.get('scale') or 1.0
 
+    if crawler_verifier is None:
+        if ranges_dir:
+            networks, ranges_meta = load_ranges(ranges_dir)
+            crawler_verifier = RangeVerifier(networks)
+        else:
+            crawler_verifier = RangeVerifier()
+
     aggregator = CacheAggregator()
+    crawlers = CrawlerAggregator(verifier=crawler_verifier)
     for index, row in enumerate(store.iter_rows(dates=dates), start=1):
         aggregator.feed(row)
+        crawlers.feed(row)
         if index % yield_every == 0:
             _yield_to_hub()
             if should_cancel is not None and should_cancel():
@@ -722,4 +742,12 @@ def analyze_pull(store, summary=None, *, dates=None, scale=None,
         'truncated_windows': summary.get('truncated_windows', 0),
         'raw_deleted': False,
     }
-    return aggregator.result(scale=scale, sample=sample, check_host=check_host)
+    result = aggregator.result(scale=scale, sample=sample, check_host=check_host)
+    result['crawlers'] = crawlers.result(scale=scale, ranges_meta=ranges_meta)
+
+    # One recommendation list, not two. The reader cares about what to change,
+    # not about which pass noticed it.
+    merged = (result.get('findings') or []) + (result['crawlers'].get('findings') or [])
+    merged.sort(key=lambda f: 0 if f['severity'] == 'warning' else 1)
+    result['findings'] = merged
+    return result

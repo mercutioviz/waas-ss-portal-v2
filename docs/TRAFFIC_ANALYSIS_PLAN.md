@@ -18,7 +18,7 @@ sibling of the profiler, not an extension of it.
 | 1 | Log pull engine: bisect fetcher, pre-flight, storage, retention, progress | **done** |
 | 2 | Admin storage utilities page | **done** (landed with phase 1) |
 | 3 | Cache analysis over a pull (revalidation ratio, repeat-fetch) + live header audit | **done** |
-| 4 | Crawler analysis (classification, IP verification, URL-space cross-tab) | planned |
+| 4 | Crawler analysis (classification, IP verification, URL-space cross-tab) | **done** |
 | 5 | robots.txt proposal engine with measured before/after | planned |
 | 6 | Customer-facing report + downloadable artifacts | planned |
 
