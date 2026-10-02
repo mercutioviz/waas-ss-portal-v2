@@ -11,6 +11,8 @@
     GET  /traffic/<id>/results          — collection summary + cache analysis
     POST /traffic/<id>/analyze          — re-run the cache analysis over rows on disk
     POST /traffic/<id>/audit            — live header audit of the busiest assets
+    POST /traffic/<id>/robots           — generate and measure a robots.txt proposal
+    GET  /traffic/<id>/robots.txt       — download the measured file
 
 Only one pull runs at a time. The portal is a single gevent worker, so two
 concurrent multi-hour pulls would contend for one event loop and make the
@@ -33,7 +35,12 @@ from flask_babel import gettext as _
 from flask_login import current_user, login_required
 
 from app import db, socketio
-from app.background_tasks import run_header_audit, run_log_pull, run_log_pull_analysis
+from app.background_tasks import (
+    run_header_audit,
+    run_log_pull,
+    run_log_pull_analysis,
+    run_robots_proposal,
+)
 from app.logpull import corpus_bytes, preflight
 from app.logpull.preflight import MAX_TOTAL_BYTES, format_duration
 from app.logpull.source import LogSource
@@ -398,6 +405,7 @@ def pull_results(pull_id):
         summary=summary,
         analysis=analysis,
         header_audit=report.get('header_audit') or {},
+        robots=report.get('robots') or {},
         status_badges=STATUS_BADGES,
         on_disk=store.size_bytes(),
         can_analyze=not pull.raw_deleted and not pull.is_active
@@ -463,3 +471,76 @@ def header_audit_route(pull_id):
     flash(_('Probing %(n)s assets. This takes a minute or two — reload to see '
             'the results.', n=len(targets)), 'info')
     return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+
+#: Pasted robots.txt is bounded well above any real file — the largest in the
+#: wild run to a few tens of KB — but not unbounded, because this lands in a
+#: DB JSON column.
+MAX_PASTED_ROBOTS = 256 * 1024
+
+
+@bp.route('/<int:pull_id>/robots', methods=['POST'])
+@login_required
+def robots_proposal_route(pull_id):
+    """Generate a robots.txt proposal and measure it against the collected rows.
+
+    Two full passes over the corpus, so this is a background task rather than
+    a request: the file has to be rendered before it can be replayed, and
+    replaying it is the whole point.
+    """
+    pull = _get_pull_or_404(pull_id)
+    if pull.is_active or pull.phase == LogPull.PHASE_ANALYZING:
+        flash(_('That pull is still working. Wait for it to finish.'), 'info')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+    if pull.raw_deleted:
+        flash(_('The raw rows for that pull have expired, and a proposal that '
+                'is not measured against real traffic is exactly what this '
+                'feature exists to avoid. Start a new pull.'), 'warning')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+    # The origin's own file beats anything we can fetch: a live request for
+    # /robots.txt goes through WaaS, which rewrites the response and can
+    # answer with a CAPTCHA page at HTTP 200.
+    current_text = (request.form.get('current_text') or '').strip() or None
+    if current_text and len(current_text) > MAX_PASTED_ROBOTS:
+        flash(_('That robots.txt is too large to be a robots.txt.'), 'warning')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+    AuditLog.log(
+        user_id=current_user.id, action='logpull_robots_proposal',
+        details=f'robots.txt proposal for log pull #{pull.id} ({pull.app_name})'
+                f'{" with pasted current file" if current_text else ""}',
+    )
+
+    real_app = current_app._get_current_object()
+    socketio.start_background_task(run_robots_proposal, real_app, pull.id,
+                                   current_text)
+    flash(_('Generating and measuring a robots.txt proposal. This reads every '
+            'collected row twice — reload in a few minutes.'), 'info')
+    return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+
+@bp.route('/<int:pull_id>/robots.txt')
+@login_required
+def robots_download(pull_id):
+    """The measured file, as a download.
+
+    Served as an attachment named for the host, because the only correct place
+    to put it is that host's document root — and a file called `robots.txt` in
+    the downloads folder tells you nothing about which site it belongs to.
+    """
+    from flask import Response
+
+    pull = _get_pull_or_404(pull_id)
+    report = (pull.report or {}).get('robots') or {}
+    text = report.get('file')
+    if not text:
+        flash(_('No robots.txt has been generated for this pull yet.'), 'warning')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+    host = report.get('host') or 'robots'
+    safe = ''.join(c for c in host if c.isalnum() or c in '.-')[:100] or 'robots'
+    return Response(
+        text, mimetype='text/plain; charset=utf-8',
+        headers={'Content-Disposition':
+                 f'attachment; filename="{safe}.robots.txt"'})

@@ -575,6 +575,56 @@ def run_header_audit(app, pull_id: int) -> None:
                       room=pull.session_id)
 
 
+def run_robots_proposal(app, pull_id: int, current_text=None) -> None:
+    """Generate a robots.txt proposal and measure it against the pull.
+
+    Two streaming passes over the rows on disk, so this is minutes on a large
+    corpus rather than the hours a collection takes — but far too long for a
+    request, hence a background task like the audit.
+
+    `current_text` is the file the origin serves, when the user has pasted it.
+    That is better evidence than anything the portal can fetch: a live request
+    for /robots.txt goes through WaaS, which rewrites the response. Without
+    it, `build_report` falls back to fetching and records what it got.
+    """
+    from app.logpull.analysis import is_auditable_host
+    from app.logpull.robots import build_report
+    from app.logpull.store import PullStore
+    from app.models import LogPull
+
+    with app.app_context():
+        pull = db.session.get(LogPull, pull_id)
+        if pull is None:
+            logger.error(f'run_robots_proposal: no LogPull with id={pull_id}')
+            return
+
+        state = {'last': 0.0}
+
+        def on_progress(rows):
+            now = time.monotonic()
+            if now - state['last'] < ANALYSIS_EMIT_INTERVAL_SECONDS:
+                return
+            state['last'] = now
+            socketio.emit('logpull_progress',
+                          {**pull.to_dict(), 'robots_rows': rows},
+                          room=pull.session_id)
+
+        report = pull.report or {}
+        try:
+            store = PullStore(app.instance_path, pull.id)
+            report['robots'] = build_report(
+                store, pull.result or {}, current_text=current_text,
+                check_host=is_auditable_host, on_progress=on_progress)
+        except Exception as e:  # noqa: BLE001 — a failed proposal is reportable
+            logger.error(f'run_robots_proposal error: {traceback.format_exc()}')
+            report['robots'] = {'error': str(e)[:300], 'host': None,
+                                'findings': [], 'proposal': None}
+        pull.report = report
+        db.session.commit()
+        socketio.emit('logpull_robots_done', {'pull_id': pull.id},
+                      room=pull.session_id)
+
+
 def _finish_pull(pull, status, message, emit):
     """Write a terminal status, tolerating a broken session."""
     from app.models import LogPull

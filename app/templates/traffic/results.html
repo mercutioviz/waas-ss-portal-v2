@@ -651,6 +651,225 @@
     </div>
 </div>
 
+{% set proposal = robots.get('proposal') or {} %}
+{% set measured = robots.get('measurement') or {} %}
+{% set active_rules = proposal.get('rules', [])|selectattr('tier', 'equalto', 'confident')|list %}
+{% set review_rules = proposal.get('rules', [])|selectattr('tier', 'equalto', 'review')|list %}
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">{{ _('robots.txt proposal') }}</h5>
+        <div class="d-flex gap-2">
+            {% if robots.get('file') %}
+            <a href="{{ url_for('traffic.robots_download', pull_id=pull.id) }}"
+               class="btn btn-sm btn-primary">
+                <i class="bi bi-download"></i> {{ _('Download robots.txt') }}
+            </a>
+            {% endif %}
+            {% if can_analyze %}
+            <button class="btn btn-sm btn-outline-primary" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#robotsForm">
+                <i class="bi bi-magic"></i>
+                {% if robots %}{{ _('Regenerate') }}{% else %}{{ _('Generate') }}{% endif %}
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-body">
+        {% if can_analyze %}
+        <div class="collapse {% if not robots %}show{% endif %}" id="robotsForm">
+            <form method="post" action="{{ url_for('traffic.robots_proposal_route', pull_id=pull.id) }}"
+                  class="mb-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <p class="text-muted mb-2">
+                    {{ _('Generates a candidate file from the paths and parameters
+                         crawlers actually fetch, then replays it against every
+                         collected row to measure what it would have stopped. No
+                         number is reported that was not measured against this
+                         pull.') }}
+                </p>
+                <label class="form-label small fw-semibold" for="current_text">
+                    {{ _('Current robots.txt (optional, but strongly preferred)') }}
+                </label>
+                <textarea class="form-control font-monospace small" rows="5"
+                          id="current_text" name="current_text"
+                          placeholder="User-agent: *&#10;Disallow: /admin"></textarea>
+                <div class="form-text">
+                    {{ _('Paste the file your origin serves. Fetching it through
+                         WaaS is unreliable: WaaS rewrites /robots.txt in flight
+                         and can answer a request for it with a CAPTCHA page at
+                         HTTP 200, which parses as an empty file — that is, as
+                         permission to crawl everything. Left blank, the portal
+                         fetches it anyway and reports what it got.') }}
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm mt-3">
+                    <i class="bi bi-magic"></i> {{ _('Generate and measure') }}
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if robots.get('error') %}
+        <div class="alert alert-danger">{{ robots['error'] }}</div>
+        {% endif %}
+
+        {% for f in robots.get('findings', []) %}{{ finding_card(f) }}{% endfor %}
+
+        {% if measured %}
+        <div class="row text-center g-3 my-3">
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Crawler requests') }}</div>
+                <div class="fs-4">{{ '{:,}'.format(measured.get('crawler_requests', 0)) }}</div>
+                <div class="text-muted small">{{ robots.get('host') }}</div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Current file blocks') }}</div>
+                <div class="fs-4">{{ '{:.1f}%'.format((measured['current'].get('request_share') or 0) * 100) }}</div>
+                <div class="text-muted small">{{ '{:,}'.format(measured['current'].get('requests', 0)) }}</div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Proposed file blocks') }}</div>
+                <div class="fs-4 text-success">{{ '{:.1f}%'.format((measured['proposed'].get('request_share') or 0) * 100) }}</div>
+                <div class="text-muted small">
+                    {{ '{:.1f}%'.format((measured['proposed'].get('byte_share') or 0) * 100) }} {{ _('of bytes') }}
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Net reduction') }}</div>
+                <div class="fs-4">{{ '{:,}'.format(measured['net'].get('requests', 0)) }}</div>
+                <div class="text-muted small">
+                    {{ _('~%(n)s over the window', n='{:,}'.format(measured['net'].get('extrapolated_requests', 0))) }}
+                </div>
+            </div>
+        </div>
+
+        {% if measured.get('with_review') %}
+        <p class="small text-muted">
+            {# The larger number is deliberately not the headline: it is only
+               reachable if somebody accepts rules the traffic cannot justify
+               on its own. #}
+            {{ _('With all %(n)s review rules enabled as well, measured: %(share)s of
+                 crawler requests and %(bytes)s of bytes.',
+                 n=review_rules|length,
+                 share='{:.1f}%%'.format((measured['with_review'].get('request_share') or 0) * 100),
+                 bytes='{:.1f}%%'.format((measured['with_review'].get('byte_share') or 0) * 100)) }}
+        </p>
+        {% endif %}
+
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <h6>{{ _('Rules that ship active') }}</h6>
+                {% if active_rules %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>{{ _('Pattern') }}</th>
+                                <th class="text-end">{{ _('Blocked') }}</th>
+                                <th class="text-end">{{ _('Crawler') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set fired = {} %}
+                            {% for r in measured.get('by_rule', []) %}{% set _ = fired.update({r.pattern: r}) %}{% endfor %}
+                            {% for rule in active_rules %}
+                            <tr>
+                                <td class="text-break"><code class="small">{{ rule.pattern }}</code></td>
+                                <td class="text-end">{{ '{:,}'.format(fired.get(rule.pattern, {}).get('requests', 0)) }}</td>
+                                <td class="text-end">{{ '{:.0f}%'.format((rule.crawler_share or 0) * 100) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted small mb-0">
+                    {{ _('None. No path or parameter here is lopsided enough to
+                         disallow without a judgement about the site.') }}
+                </p>
+                {% endif %}
+
+                {% if review_rules %}
+                <h6 class="mt-4">{{ _('Rules left commented out for review') }}</h6>
+                <p class="text-muted small">
+                    {{ _('Crawl-heavy, but real visitors reach them too. Disallowing
+                         these trades crawl load against search visibility, so they
+                         ship inactive rather than decided for you.') }}
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>{{ _('Pattern') }}</th>
+                                <th class="text-end">{{ _('Crawler') }}</th>
+                                <th class="text-end">{{ _('Non-crawler') }}</th>
+                                <th class="text-end">{{ _('Share') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for rule in review_rules %}
+                            <tr>
+                                <td class="text-break"><code class="small">{{ rule.pattern }}</code></td>
+                                <td class="text-end">{{ '{:,}'.format(rule.crawler_requests) }}</td>
+                                <td class="text-end">{{ '{:,}'.format(rule.human_requests) }}</td>
+                                <td class="text-end">{{ '{:.0f}%'.format((rule.crawler_share or 0) * 100) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="col-lg-6">
+                <h6>{{ _('Effect per crawler') }}</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>{{ _('Crawler') }}</th>
+                                <th class="text-end">{{ _('Requests') }}</th>
+                                <th class="text-end">{{ _('Newly blocked') }}</th>
+                                <th class="text-end">{{ _('Share') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in measured.get('by_crawler', [])[:12] %}
+                            <tr>
+                                <td>{{ c.label }}</td>
+                                <td class="text-end">{{ '{:,}'.format(c.requests) }}</td>
+                                <td class="text-end">{{ '{:,}'.format(c.newly_blocked) }}</td>
+                                <td class="text-end">{{ '{:.1f}%'.format((c.share_blocked or 0) * 100) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted small mt-2 mb-0">
+                    {{ _('Per-crawler shares are the point of measuring: a proposal
+                         can look strong overall while barely touching the crawler
+                         that matters most to the customer.') }}
+                </p>
+            </div>
+        </div>
+
+        {% if robots.get('served') and robots['served'].get('served_as_html') %}
+        <div class="alert alert-warning mt-4 mb-0">
+            <i class="bi bi-exclamation-triangle"></i>
+            {{ _('The file fetched for this host came back as HTML, not plain text.
+                 That is usually WaaS answering with a challenge page at HTTP 200 —
+                 which a crawler parses as a robots.txt containing no rules, i.e.
+                 as permission to crawl everything. Paste the origin\'s real file
+                 above and regenerate.') }}
+        </div>
+        {% endif %}
+        {% elif robots and not robots.get('error') %}
+        <p class="text-muted mb-0">
+            {{ _('No proposal was produced for this pull.') }}
+        </p>
+        {% endif %}
+    </div>
+</div>
+
 {% else %}
 <div class="card">
     <div class="card-body text-muted">

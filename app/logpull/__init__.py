@@ -11,12 +11,21 @@ Modules:
     analysis     — streaming cache analysis over a completed pull
     crawlers     — crawler classification and published-IP-range verification
     header_audit — live three-probe conditional replay against the origin
+    robots       — robots.txt proposal engine, measured by replay
 
 See docs/TRAFFIC_ANALYSIS_PLAN.md for the design and its constraints.
 """
 from app.logpull.analysis import CacheAggregator, analyze_pull
 from app.logpull.crawlers import CrawlerAggregator, classify_ua, load_ranges
 from app.logpull.preflight import estimate, format_duration, preflight
+from app.logpull.robots import (
+    Replay,
+    Robots,
+    RobotsAggregator,
+    propose,
+    render_file,
+)
+from app.logpull.robots import build_report as build_robots_report
 from app.logpull.source import LogSource
 from app.logpull.store import PullStore, corpus_bytes, corpus_root
 from app.logpull.windows import (
@@ -37,7 +46,11 @@ __all__ = [
     'Cancelled',
     'CrawlerAggregator',
     'DrainStats',
+    'Replay',
+    'Robots',
+    'RobotsAggregator',
     'analyze_pull',
+    'build_robots_report',
     'classify_ua',
     'load_ranges',
     'LogSource',
@@ -52,5 +65,7 @@ __all__ = [
     'format_duration',
     'plan_days',
     'preflight',
+    'propose',
+    'render_file',
     'scale_factor',
 ]
