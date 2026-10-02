@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% from "macros/pagination.html" import render_pagination %}
+{% block title %}{{ _('Traffic Analysis') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Traffic Analysis'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <h2 class="mb-0"><i class="bi bi-graph-down-arrow"></i> {{ _('Traffic Analysis') }}</h2>
+    <a href="{{ url_for('traffic.new_pull') }}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> {{ _('New analysis') }}
+    </a>
+</div>
+
+<p class="text-muted">
+    {{ _('Collects access logs over a time window and looks for traffic that
+         does not need to happen — assets refetched because they are not
+         cacheable, and crawlers walking generated URL space.') }}
+</p>
+
+{% if active %}
+{# The slot is portal-wide, so someone else's pull has to be announced here —
+   but without naming their application, and without a progress link that
+   would only 404. #}
+{% set active_is_mine = active.user_id == current_user.id %}
+<div class="alert alert-info d-flex justify-content-between align-items-center">
+    <div>
+        <i class="bi bi-hourglass-split"></i>
+        {% if active_is_mine %}
+        {{ _('Pull #%(id)s is running for %(app)s.', id=active.id, app=active.app_name) }}
+        {% else %}
+        {{ _('Another user is running a pull.') }}
+        {% endif %}
+        <span class="text-muted small">{{ _('Only one runs at a time.') }}</span>
+    </div>
+    {% if active_is_mine %}
+    <a href="{{ url_for('traffic.watch_pull', pull_id=active.id) }}" class="btn btn-sm btn-outline-primary">
+        {{ _('View progress') }}
+    </a>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body">
+        {% if pulls.items %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>{{ _('Application') }}</th>
+                        <th>{{ _('Window') }}</th>
+                        <th>{{ _('Mode') }}</th>
+                        <th>{{ _('Status') }}</th>
+                        <th class="text-end">{{ _('Rows') }}</th>
+                        <th class="text-end">{{ _('On disk') }}</th>
+                        <th>{{ _('Started') }}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pull in pulls.items %}
+                    <tr>
+                        <td class="text-muted">{{ pull.id }}</td>
+                        <td><code>{{ pull.app_name }}</code></td>
+                        <td>{{ pull.window_days }}d</td>
+                        <td>
+                            <span class="badge {% if pull.mode == 'full' %}bg-dark{% else %}bg-secondary{% endif %}">
+                                {{ pull.mode }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge {{ status_badges.get(pull.status, 'bg-secondary') }}">{{ pull.status }}</span>
+                            {% if pull.truncated_windows %}
+                            <i class="bi bi-exclamation-triangle text-warning"
+                               title="{{ _('%(n)s window(s) exceeded the pagination cap and were truncated.', n=pull.truncated_windows) }}"></i>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">{{ '{:,}'.format(pull.rows_fetched) }}</td>
+                        <td class="text-end">
+                            {% if pull.raw_deleted %}
+                            <span class="text-muted small">{{ _('expired') }}</span>
+                            {% else %}
+                            {{ pull.bytes_on_disk | filesizeformat }}
+                            {% endif %}
+                        </td>
+                        <td class="small text-muted">{{ pull.created_at | datetime_format }}</td>
+                        <td class="text-end">
+                            {% if pull.is_active %}
+                            <a href="{{ url_for('traffic.watch_pull', pull_id=pull.id) }}" class="btn btn-sm btn-outline-primary">{{ _('Progress') }}</a>
+                            {% elif pull.status == 'complete' %}
+                            <a href="{{ url_for('traffic.pull_results', pull_id=pull.id) }}" class="btn btn-sm btn-outline-secondary">{{ _('Results') }}</a>
+                            {% else %}
+                            <a href="{{ url_for('traffic.pull_results', pull_id=pull.id) }}" class="btn btn-sm btn-outline-secondary">{{ _('Details') }}</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {{ render_pagination('traffic.index', pulls.page, pulls.pages, pulls.total, pulls.per_page) }}
+        {% else %}
+        <div class="text-center text-muted py-4">
+            <i class="bi bi-graph-down-arrow fs-1 d-block mb-2"></i>
+            {{ _('No analyses yet.') }}
+        </div>
+        {% endif %}
+    </div>
+    <div class="card-footer text-muted small d-flex justify-content-between">
+        <span>
+            {{ _('Stored log data: %(used)s of %(cap)s cap',
+                 used=corpus_bytes|filesizeformat, cap=corpus_max_bytes|filesizeformat) }}
+        </span>
+        {% if current_user.role == 'admin' %}
+        <a href="{{ url_for('admin.storage') }}">{{ _('Manage storage') }}</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

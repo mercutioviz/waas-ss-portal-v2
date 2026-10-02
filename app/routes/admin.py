@@ -31,12 +31,16 @@ def index():
     account_count = WaasAccount.query.count()
     recent_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(20).all()
 
+    from flask import current_app
+    from app.logpull.store import corpus_bytes
+
     return render_template(
         'admin/index.html',
         user_count=user_count,
         active_users=active_users,
         account_count=account_count,
-        recent_logs=recent_logs
+        recent_logs=recent_logs,
+        logpull_bytes=corpus_bytes(current_app.instance_path),
     )
 
 
@@ -200,3 +204,114 @@ def audit_log():
         date_from=date_from,
         date_to=date_to,
     )
+
+
+# --- Storage utilities -----------------------------------------------------
+
+@bp.route('/storage')
+@login_required
+@admin_required
+def storage():
+    """Disk usage for log pulls, with manual cleanup.
+
+    Pulled log rows are the only thing the portal writes that reaches
+    gigabytes, so this is where an admin goes when the disk is filling. The
+    retention sweep runs nightly; this page is the manual override.
+    """
+    import shutil
+
+    from flask import current_app
+    from app.background_tasks import (
+        LOG_PULL_RAW_RETENTION_DAYS,
+        LOG_PULL_RESULT_RETENTION_DAYS,
+    )
+    from app.logpull.preflight import MAX_TOTAL_BYTES
+    from app.logpull.store import PullStore, corpus_bytes
+    from app.models import LogPull
+
+    pulls = LogPull.query.order_by(LogPull.created_at.desc()).all()
+    rows = []
+    for pull in pulls:
+        store = PullStore(current_app.instance_path, pull.id)
+        rows.append({'pull': pull, 'size': store.size_bytes()})
+
+    usage = shutil.disk_usage(current_app.instance_path)
+    total = corpus_bytes(current_app.instance_path)
+
+    return render_template(
+        'admin/storage.html',
+        rows=rows,
+        corpus_bytes=total,
+        corpus_max_bytes=MAX_TOTAL_BYTES,
+        disk_free=usage.free,
+        disk_total=usage.total,
+        raw_retention_days=LOG_PULL_RAW_RETENTION_DAYS,
+        result_retention_days=LOG_PULL_RESULT_RETENTION_DAYS,
+    )
+
+
+@bp.route('/storage/<int:pull_id>/delete-raw', methods=['POST'])
+@login_required
+@admin_required
+def storage_delete_raw(pull_id):
+    """Drop the bulk rows but keep the pull and its analysis."""
+    from flask import current_app
+    from app.logpull.store import PullStore
+    from app.models import LogPull
+
+    pull = LogPull.query.get_or_404(pull_id)
+    if pull.is_active:
+        flash(_('That pull is still running. Cancel it first.'), 'warning')
+        return redirect(url_for('admin.storage'))
+
+    freed = PullStore(current_app.instance_path, pull.id).delete_raw()
+    pull.raw_deleted = True
+    pull.bytes_on_disk = PullStore(current_app.instance_path, pull.id).size_bytes()
+    db.session.commit()
+
+    AuditLog.log(user_id=current_user.id, action='logpull_delete_raw',
+                 details=f'Deleted raw rows for log pull #{pull.id} '
+                         f'({freed / 1e6:.1f} MB freed)')
+    flash(_('Freed %(mb).1f MB. The analysis for that pull is still available.',
+            mb=freed / 1e6), 'success')
+    return redirect(url_for('admin.storage'))
+
+
+@bp.route('/storage/<int:pull_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def storage_delete_pull(pull_id):
+    from flask import current_app
+    from app.logpull.store import PullStore
+    from app.models import LogPull
+
+    pull = LogPull.query.get_or_404(pull_id)
+    if pull.is_active:
+        flash(_('That pull is still running. Cancel it first.'), 'warning')
+        return redirect(url_for('admin.storage'))
+
+    freed = PullStore(current_app.instance_path, pull.id).delete_all()
+    label = f'#{pull.id} ({pull.app_name})'
+    db.session.delete(pull)
+    db.session.commit()
+
+    AuditLog.log(user_id=current_user.id, action='logpull_delete',
+                 details=f'Deleted log pull {label} ({freed / 1e6:.1f} MB freed)')
+    flash(_('Deleted pull %(label)s and freed %(mb).1f MB.', label=label,
+            mb=freed / 1e6), 'success')
+    return redirect(url_for('admin.storage'))
+
+
+@bp.route('/storage/reap', methods=['POST'])
+@login_required
+@admin_required
+def storage_reap():
+    """Run the retention sweep now instead of waiting for the nightly cron."""
+    from flask import current_app
+    from app.background_tasks import run_log_pull_cleanup
+
+    affected = run_log_pull_cleanup(current_app._get_current_object())
+    AuditLog.log(user_id=current_user.id, action='logpull_reap',
+                 details=f'Manual retention sweep affected {affected} pull(s)')
+    flash(_('Retention sweep complete: %(n)s pull(s) affected.', n=affected), 'success')
+    return redirect(url_for('admin.storage'))

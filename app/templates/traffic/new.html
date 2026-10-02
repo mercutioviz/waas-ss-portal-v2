@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('New Traffic Analysis') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Traffic Analysis'), url_for('traffic.index')),
+    (_('New'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-3">
+    <h2><i class="bi bi-graph-down-arrow"></i> {{ _('New Traffic Analysis') }}</h2>
+</div>
+
+{% if active %}
+<div class="alert alert-warning">
+    <i class="bi bi-hourglass-split"></i>
+    {{ _('Pull #%(id)s is already running. Only one pull runs at a time —
+         the portal has a single worker, so a second one would slow both
+         down without finishing sooner.', id=active.id) }}
+    {% if active.user_id == current_user.id %}
+    <a href="{{ url_for('traffic.watch_pull', pull_id=active.id) }}">{{ _('View progress') }}</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> {{ error }}</div>
+{% endif %}
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">{{ _('What to analyze') }}</h5></div>
+            <div class="card-body">
+                <form method="get" action="{{ url_for('traffic.new_pull') }}" class="mb-3">
+                    <label class="form-label">{{ _('Account') }}</label>
+                    <div class="input-group">
+                        <select name="account_id" class="form-select" onchange="this.form.submit()">
+                            <option value="">{{ _('Select an account...') }}</option>
+                            {% for acct in accounts %}
+                            <option value="{{ acct.id }}" {% if account and acct.id == account.id %}selected{% endif %}>
+                                {{ acct.account_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <noscript><button class="btn btn-outline-secondary" type="submit">{{ _('Go') }}</button></noscript>
+                    </div>
+                </form>
+
+                {% if account %}
+                <form method="post" action="{{ url_for('traffic.create_pull') }}" id="pullForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="account_id" value="{{ account.id }}">
+                    <input type="hidden" name="app_name" id="appNameField" value="">
+
+                    <div class="mb-3">
+                        <label class="form-label" for="appSelect">{{ _('Application') }}</label>
+                        <select name="app_id" id="appSelect" class="form-select" required>
+                            <option value="">{{ _('Select an application...') }}</option>
+                            {% for app in applications %}
+                            <option value="{{ app.name }}">{{ app.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">{{ _('Time window') }}</label>
+                        {% for days, label in window_choices %}
+                        <div class="form-check">
+                            <input class="form-check-input window-radio" type="radio" name="window_days"
+                                   id="win{{ days }}" value="{{ days }}" {% if days == 7 %}checked{% endif %}>
+                            <label class="form-check-label" for="win{{ days }}">{{ label }}</label>
+                        </div>
+                        {% endfor %}
+                        <div class="form-text">
+                            {{ _('7 days is usually enough — findings tend to be visible within a
+                                 few days. A longer window raises confidence, not detection.') }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">{{ _('Collection mode') }}</label>
+                        <div class="form-check">
+                            <input class="form-check-input mode-radio" type="radio" name="mode"
+                                   id="modeSample" value="sample" checked>
+                            <label class="form-check-label" for="modeSample">
+                                {{ _('Sampled') }} <span class="text-muted small">{{ _('— faster; a slice of every two hours, extrapolated') }}</span>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input mode-radio" type="radio" name="mode"
+                                   id="modeFull" value="full">
+                            <label class="form-check-label" for="modeFull">
+                                {{ _('Full') }} <span class="text-muted small">{{ _('— every request; slower, exact') }}</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-check mb-3 d-none" id="confirmBlock">
+                        <input class="form-check-input" type="checkbox" name="confirm_full" value="yes" id="confirmFull">
+                        <label class="form-check-label text-danger" for="confirmFull">
+                            <strong id="confirmText">{{ _('I understand this will take a long time.') }}</strong>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="startBtn" {% if active %}disabled{% endif %}>
+                        <i class="bi bi-play-fill"></i> {{ _('Start analysis') }}
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card" id="estimateCard">
+            <div class="card-header"><h5 class="mb-0">{{ _('Estimate') }}</h5></div>
+            <div class="card-body" id="estimateBody">
+                <p class="text-muted mb-0">{{ _('Pick an application to size the pull.') }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var appSelect = document.getElementById('appSelect');
+    if (!appSelect) { return; }
+
+    var body = document.getElementById('estimateBody');
+    var appNameField = document.getElementById('appNameField');
+    var confirmBlock = document.getElementById('confirmBlock');
+    var confirmText = document.getElementById('confirmText');
+    var confirmFull = document.getElementById('confirmFull');
+    var accountId = {{ account.id if account else 'null' }};
+    var latest = null;
+
+    function fmtBytes(n) {
+        if (n < 1024) { return n + ' B'; }
+        var units = ['KB', 'MB', 'GB', 'TB'], i = -1;
+        do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+        return n.toFixed(1) + ' ' + units[i];
+    }
+
+    function selectedMode() {
+        var el = document.querySelector('.mode-radio:checked');
+        return el ? el.value : 'sample';
+    }
+
+    function selectedWindow() {
+        var el = document.querySelector('.window-radio:checked');
+        return el ? el.value : '7';
+    }
+
+    function renderRow(label, opt, recommended) {
+        var disk = opt.disk || {};
+        var warn = disk.blocked
+            ? '<div class="small text-danger mt-1"><i class="bi bi-exclamation-octagon"></i> '
+              + 'Not enough free disk space ({{ _("needs") }} ' + fmtBytes(opt.bytes)
+              + ', ' + fmtBytes(disk.free_bytes) + ' {{ _("free") }}).</div>'
+            : '';
+        return ''
+            + '<div class="d-flex justify-content-between align-items-start border-bottom py-2">'
+            +   '<div>'
+            +     '<strong>' + label + '</strong>'
+            +     (recommended ? ' <span class="badge bg-success-subtle text-success-emphasis">{{ _("recommended") }}</span>' : '')
+            +     '<div class="small text-muted">' + opt.rows.toLocaleString() + ' {{ _("rows") }} · ' + fmtBytes(opt.bytes) + '</div>'
+            +     warn
+            +   '</div>'
+            +   '<div class="text-end"><span class="fs-5">' + opt.duration_label + '</span></div>'
+            + '</div>';
+    }
+
+    function syncConfirm() {
+        if (!latest) { return; }
+        var needs = latest.full_requires_confirmation && selectedMode() === 'full';
+        confirmBlock.classList.toggle('d-none', !needs);
+        if (needs) {
+            confirmText.textContent =
+                '{{ _("I understand this will take about") }} '
+                + latest.options.full.duration_label + '.';
+        } else {
+            confirmFull.checked = false;
+        }
+    }
+
+    function refresh() {
+        var appId = appSelect.value;
+        appNameField.value = appId;
+        if (!appId) {
+            body.innerHTML = '<p class="text-muted mb-0">{{ _("Pick an application to size the pull.") }}</p>';
+            latest = null;
+            syncConfirm();
+            return;
+        }
+        body.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>{{ _("Counting...") }}</div>';
+
+        fetch('{{ url_for("traffic.preflight_estimate") }}', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}'},
+            body: JSON.stringify({account_id: accountId, app_id: appId, window_days: selectedWindow()})
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.error) {
+                body.innerHTML = '<div class="text-danger small">' + data.error + '</div>';
+                return;
+            }
+            latest = data;
+            var html = '<p class="mb-2">'
+                + '<span class="fs-4">' + data.total_rows.toLocaleString() + '</span>'
+                + ' <span class="text-muted">{{ _("requests in the last") }} ' + data.window_days + ' {{ _("days") }}</span></p>';
+            html += renderRow('{{ _("Sampled") }}', data.options.sample, data.recommended_mode === 'sample');
+            html += renderRow('{{ _("Full") }}', data.options.full, data.recommended_mode === 'full');
+            if (data.corpus_full) {
+                html += '<div class="alert alert-danger small mt-3 mb-0">{{ _("Stored log data is over the cap. Free space before starting.") }}</div>';
+            }
+            body.innerHTML = html;
+            syncConfirm();
+        })
+        .catch(function () {
+            body.innerHTML = '<div class="text-danger small">{{ _("Could not reach the API.") }}</div>';
+        });
+    }
+
+    appSelect.addEventListener('change', refresh);
+    document.querySelectorAll('.window-radio').forEach(function (el) {
+        el.addEventListener('change', refresh);
+    });
+    document.querySelectorAll('.mode-radio').forEach(function (el) {
+        el.addEventListener('change', syncConfirm);
+    });
+})();
+</script>
+{% endblock %}

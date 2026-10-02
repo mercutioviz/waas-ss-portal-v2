@@ -15,8 +15,8 @@ sibling of the profiler, not an extension of it.
 | Phase | Scope | State |
 |-------|-------|-------|
 | 0 | Land `traffic_insights.py` + truncation-aware config advisor | **done** (`64f34e5`, `bc1167f`) |
-| 1 | Log pull engine: bisect fetcher, pre-flight, storage, retention, progress | planned |
-| 2 | Admin storage utilities page | planned |
+| 1 | Log pull engine: bisect fetcher, pre-flight, storage, retention, progress | **done** |
+| 2 | Admin storage utilities page | **done** (landed with phase 1) |
 | 3 | Cache analysis over a pull (revalidation ratio, repeat-fetch) | planned |
 | 4 | Crawler analysis (classification, IP verification, URL-space cross-tab) | planned |
 | 5 | robots.txt proposal engine with measured before/after | planned |

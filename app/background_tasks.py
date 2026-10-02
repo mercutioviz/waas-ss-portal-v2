@@ -369,3 +369,179 @@ def run_security_metric_cleanup(app) -> int:
         logger.info(f'Security metric cleanup: deleted {deleted} row(s) older than '
                     f'{SECURITY_METRIC_RETENTION_DAYS} days.')
         return deleted
+
+
+# --- Log pulls (traffic reduction analysis) --------------------------------
+
+LOG_PULL_RAW_RETENTION_DAYS = 3
+LOG_PULL_RESULT_RETENTION_DAYS = 30
+
+
+def run_log_pull(app, pull_id: int, session_id: str) -> None:
+    """Greenlet body: collect access logs for a LogPull, persist, emit progress.
+
+    Unlike run_site_profile this can run for hours, which changes two things.
+    Progress is written to the LogPull row on a throttle and SocketIO merely
+    mirrors it, so a browser that reconnects (or a user on another machine)
+    sees real state. And every exit path — including a service restart
+    landing mid-pull — leaves either a terminal status or `interrupted` with
+    the partial data intact and resumable.
+    """
+    from app.logpull.runner import DiskAborted, PullRunner
+    from app.logpull.windows import Cancelled, Window
+    from app.models import LogPull
+    from app.socketio_events import clear_join_signal, pending_join
+
+    with app.app_context():
+        try:
+            pending_join(session_id).wait(timeout=10.0)
+        except Exception:  # pragma: no cover — defensive
+            pass
+
+        pull = db.session.get(LogPull, pull_id)
+        if pull is None:
+            logger.error(f'run_log_pull: no LogPull with id={pull_id}')
+            clear_join_signal(session_id)
+            return
+
+        def emit(payload):
+            socketio.emit('logpull_progress', payload, room=session_id)
+
+        try:
+            account = pull.account
+            client = WaasClient.from_account(account)
+
+            pull.status = LogPull.STATUS_RUNNING
+            pull.started_at = datetime.utcnow()
+            pull.phase = LogPull.PHASE_COUNTING
+            pull.raw_expires_at = datetime.utcnow() + timedelta(days=LOG_PULL_RAW_RETENTION_DAYS)
+            db.session.commit()
+            emit(pull.to_dict())
+
+            runner = PullRunner(db, pull, client, app.instance_path, emit=emit)
+
+            # Exact denominator for the progress bar. Already computed at
+            # pre-flight, but re-counted here because the user may have sat
+            # on the confirmation page and the window has moved since.
+            if not pull.rows_expected:
+                total = runner.source.count(Window(pull.range_start, pull.range_end))
+                pull.rows_expected = total
+                db.session.commit()
+
+            summary = runner.run()
+
+            pull.result = summary
+            pull.status = LogPull.STATUS_COMPLETE
+            pull.phase = LogPull.PHASE_DONE
+            pull.completed_at = datetime.utcnow()
+            pull.bytes_on_disk = runner.store.size_bytes()
+            pull.eta_seconds = 0
+            db.session.commit()
+            emit(pull.to_dict())
+
+        except Cancelled:
+            logger.info(f'run_log_pull: pull {pull_id} cancelled by user')
+            _finish_pull(pull, LogPull.STATUS_CANCELLED,
+                         'Cancelled. Partial data kept.', emit)
+
+        except DiskAborted as e:
+            logger.error(f'run_log_pull: pull {pull_id} aborted on disk: {e}')
+            _finish_pull(pull, LogPull.STATUS_ABORTED_DISK, str(e), emit)
+
+        except WaasApiError as e:
+            logger.error(f'run_log_pull: pull {pull_id} API error: {e}')
+            _finish_pull(pull, LogPull.STATUS_ERROR, str(e), emit)
+
+        except Exception as e:  # noqa: BLE001 — terminal-state guarantee
+            logger.error(f'run_log_pull error: {traceback.format_exc()}')
+            _finish_pull(pull, LogPull.STATUS_ERROR, str(e), emit)
+
+        finally:
+            clear_join_signal(session_id)
+
+
+def _finish_pull(pull, status, message, emit):
+    """Write a terminal status, tolerating a broken session."""
+    from app.models import LogPull
+
+    try:
+        pull.status = status
+        pull.phase = LogPull.PHASE_DONE
+        pull.error_message = message
+        pull.completed_at = datetime.utcnow()
+        db.session.commit()
+        emit(pull.to_dict())
+    except Exception:  # pragma: no cover — defensive
+        logger.error(f'_finish_pull failed: {traceback.format_exc()}')
+        db.session.rollback()
+
+
+def reconcile_interrupted_pulls(app) -> int:
+    """Mark pulls left RUNNING by a restart as interrupted.
+
+    Called at startup. A greenlet does not survive `systemctl restart`, so
+    any row still claiming to be running is stale. Its partial data stays on
+    disk and the day checkpoints make it resumable, so this marks rather
+    than deletes.
+    """
+    from app.models import LogPull
+
+    with app.app_context():
+        stale = LogPull.query.filter(
+            LogPull.status.in_(LogPull.ACTIVE_STATUSES)
+        ).all()
+        for pull in stale:
+            pull.status = LogPull.STATUS_INTERRUPTED
+            pull.error_message = (
+                'Interrupted by a portal restart. Collected days were kept; '
+                'resuming continues from the last completed day.'
+            )
+        if stale:
+            db.session.commit()
+            logger.info(f'Marked {len(stale)} interrupted log pull(s).')
+        return len(stale)
+
+
+def run_log_pull_cleanup(app) -> int:
+    """Retention sweep: reap raw rows, then whole pulls.
+
+    Two windows, deliberately. Raw rows are gigabytes with a short useful
+    life; the aggregates and report are kilobytes and should outlive them.
+    Splitting the two is what makes a 3-day raw retention safe — the pull
+    stays visible and its report still opens afterwards, just marked as
+    having expired raw data.
+    """
+    from app.logpull.store import PullStore
+    from app.models import LogPull
+
+    with app.app_context():
+        freed = 0
+        now = datetime.utcnow()
+
+        raw_due = LogPull.query.filter(
+            LogPull.raw_deleted.is_(False),
+            LogPull.raw_expires_at.isnot(None),
+            LogPull.raw_expires_at < now,
+            LogPull.status.notin_(LogPull.ACTIVE_STATUSES),
+        ).all()
+        for pull in raw_due:
+            freed += PullStore(app.instance_path, pull.id).delete_raw()
+            pull.raw_deleted = True
+            pull.bytes_on_disk = PullStore(app.instance_path, pull.id).size_bytes()
+
+        result_cutoff = now - timedelta(days=LOG_PULL_RESULT_RETENTION_DAYS)
+        old = LogPull.query.filter(
+            LogPull.created_at < result_cutoff,
+            LogPull.status.notin_(LogPull.ACTIVE_STATUSES),
+        ).all()
+        for pull in old:
+            freed += PullStore(app.instance_path, pull.id).delete_all()
+            db.session.delete(pull)
+
+        if raw_due or old:
+            db.session.commit()
+            logger.info(
+                f'Log pull cleanup: reaped raw for {len(raw_due)}, '
+                f'deleted {len(old)} pull(s), freed {freed / 1e6:.1f} MB.'
+            )
+        return len(raw_due) + len(old)

@@ -70,7 +70,7 @@
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle {% if ep.startswith('logs.') or ep.startswith('reports.') or ep.startswith('config_history.') or ep.startswith('review.') %}active{% endif %}"
+                        <a class="nav-link dropdown-toggle {% if ep.startswith('logs.') or ep.startswith('reports.') or ep.startswith('config_history.') or ep.startswith('review.') or ep.startswith('traffic.') %}active{% endif %}"
                            href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-bar-chart"></i> {{ _('Observability') }}
                         </a>
@@ -79,6 +79,7 @@
                             <li><a class="dropdown-item {% if ep.startswith('reports.') %}active{% endif %}" href="{{ url_for('reports.list_reports') }}"><i class="bi bi-calendar-check"></i> {{ _('Reports') }}</a></li>
                             <li><a class="dropdown-item {% if ep.startswith('config_history.') %}active{% endif %}" href="{{ url_for('config_history.list_snapshots') }}"><i class="bi bi-clock-history"></i> {{ _('Config History') }}</a></li>
                             <li><a class="dropdown-item {% if ep.startswith('review.') %}active{% endif %}" href="{{ url_for('review.index') }}"><i class="bi bi-clipboard2-data"></i> {{ _('Account/Config Review') }}</a></li>
+                            <li><a class="dropdown-item {% if ep.startswith('traffic.') %}active{% endif %}" href="{{ url_for('traffic.index') }}"><i class="bi bi-graph-down-arrow"></i> {{ _('Traffic Analysis') }}</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -356,6 +357,8 @@
         {title: {{ _('Reports')|tojson }}, url: {{ url_for('reports.list_reports')|tojson }}, icon: 'calendar-check'},
         {title: {{ _('Config History')|tojson }}, url: {{ url_for('config_history.list_snapshots')|tojson }}, icon: 'clock-history'},
         {title: {{ _('Account/Config Review')|tojson }}, url: {{ url_for('review.index')|tojson }}, icon: 'clipboard2-data'},
+        {title: {{ _('Traffic Analysis')|tojson }}, url: {{ url_for('traffic.index')|tojson }}, icon: 'graph-down-arrow'},
+        {title: {{ _('New traffic analysis')|tojson }}, url: {{ url_for('traffic.new_pull')|tojson }}, icon: 'cloud-download'},
         {title: {{ _('Help Center')|tojson }}, url: {{ url_for('help.index')|tojson }}, icon: 'question-circle'},
         {title: {{ _('Profile')|tojson }}, url: {{ url_for('auth.profile')|tojson }}, icon: 'person'},
         {title: {{ _('Change password')|tojson }}, url: {{ url_for('auth.change_password')|tojson }}, icon: 'lock'}
@@ -363,6 +366,7 @@
         ,{title: {{ _('Admin dashboard')|tojson }}, url: {{ url_for('admin.index')|tojson }}, icon: 'speedometer'}
         ,{title: {{ _('Users')|tojson }}, url: {{ url_for('admin.list_users')|tojson }}, icon: 'people'}
         ,{title: {{ _('Audit log')|tojson }}, url: {{ url_for('admin.audit_log')|tojson }}, icon: 'clipboard-data'}
+        ,{title: {{ _('Storage')|tojson }}, url: {{ url_for('admin.storage')|tojson }}, icon: 'hdd'}
         {% endif %}
     ];
     </script>

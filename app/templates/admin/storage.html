@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Storage') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Admin'), url_for('admin.index')),
+    (_('Storage'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+{% set pct = (corpus_bytes * 100 / corpus_max_bytes) if corpus_max_bytes else 0 %}
+{% set disk_pct = ((disk_total - disk_free) * 100 / disk_total) if disk_total else 0 %}
+
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <h2 class="mb-0"><i class="bi bi-hdd"></i> {{ _('Storage') }}</h2>
+    <form method="post" action="{{ url_for('admin.storage_reap') }}"
+          onsubmit="return confirm('{{ _('Run the retention sweep now?') }}');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-primary">
+            <i class="bi bi-recycle"></i> {{ _('Run retention sweep') }}
+        </button>
+    </form>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="text-muted">{{ _('Log pull data') }}</h6>
+                <div class="d-flex justify-content-between">
+                    <span class="fs-4">{{ corpus_bytes | filesizeformat }}</span>
+                    <span class="text-muted align-self-end">{{ _('of %(cap)s cap', cap=corpus_max_bytes|filesizeformat) }}</span>
+                </div>
+                <div class="progress mt-2" style="height: 8px;">
+                    <div class="progress-bar {% if pct > 90 %}bg-danger{% elif pct > 70 %}bg-warning{% endif %}"
+                         style="width: {{ [pct, 100] | min }}%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="text-muted">{{ _('Filesystem') }}</h6>
+                <div class="d-flex justify-content-between">
+                    <span class="fs-4">{{ disk_free | filesizeformat }}</span>
+                    <span class="text-muted align-self-end">{{ _('free of %(t)s', t=disk_total|filesizeformat) }}</span>
+                </div>
+                <div class="progress mt-2" style="height: 8px;">
+                    <div class="progress-bar {% if disk_pct > 90 %}bg-danger{% elif disk_pct > 80 %}bg-warning{% endif %}"
+                         style="width: {{ disk_pct }}%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-light border small">
+    <i class="bi bi-info-circle"></i>
+    {{ _('Raw log rows are deleted after %(raw)s days; the analysis and report are
+         kept for %(res)s days. Splitting the two is deliberate — the rows are
+         gigabytes with a short useful life, the conclusions are kilobytes and
+         should outlive them, so a pull stays readable after its raw data is reaped.',
+         raw=raw_retention_days, res=result_retention_days) }}
+</div>
+
+<div class="card">
+    <div class="card-header"><h5 class="mb-0">{{ _('Log pulls') }}</h5></div>
+    <div class="card-body">
+        {% if rows %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>{{ _('Application') }}</th>
+                        <th>{{ _('Owner') }}</th>
+                        <th>{{ _('Status') }}</th>
+                        <th class="text-end">{{ _('Size') }}</th>
+                        <th>{{ _('Created') }}</th>
+                        <th>{{ _('Raw expires') }}</th>
+                        <th class="text-end">{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    {% set pull = row.pull %}
+                    <tr>
+                        <td class="text-muted">{{ pull.id }}</td>
+                        <td><code>{{ pull.app_name }}</code>
+                            <div class="text-muted small">{{ pull.mode }} · {{ pull.window_days }}d</div>
+                        </td>
+                        <td class="small">{{ pull.user.display_name if pull.user else '—' }}</td>
+                        <td><span class="badge bg-secondary">{{ pull.status }}</span></td>
+                        <td class="text-end">{{ row.size | filesizeformat }}</td>
+                        <td class="small text-muted">{{ pull.created_at | datetime_format }}</td>
+                        <td class="small text-muted">
+                            {% if pull.raw_deleted %}
+                            <span class="badge bg-light text-muted">{{ _('reaped') }}</span>
+                            {% elif pull.raw_expires_at %}
+                            {{ pull.raw_expires_at | datetime_format }}
+                            {% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="text-end text-nowrap">
+                            {% if pull.is_active %}
+                            <span class="text-muted small">{{ _('running') }}</span>
+                            {% else %}
+                            {% if not pull.raw_deleted and row.size %}
+                            <form method="post" class="d-inline"
+                                  action="{{ url_for('admin.storage_delete_raw', pull_id=pull.id) }}"
+                                  onsubmit="return confirm('{{ _('Delete raw rows for this pull? The analysis is kept.') }}');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-warning">{{ _('Delete raw') }}</button>
+                            </form>
+                            {% endif %}
+                            <form method="post" class="d-inline"
+                                  action="{{ url_for('admin.storage_delete_pull', pull_id=pull.id) }}"
+                                  onsubmit="return confirm('{{ _('Delete this pull entirely? This cannot be undone.') }}');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">{{ _('Delete') }}</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+            <i class="bi bi-hdd fs-1 d-block mb-2"></i>
+            {{ _('No log pulls stored.') }}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

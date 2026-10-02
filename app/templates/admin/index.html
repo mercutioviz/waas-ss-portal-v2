@@ -43,6 +43,16 @@
             <div class="card-footer"><a href="{{ url_for('admin.audit_log') }}" class="text-decoration-none">{{ _('View Audit Log') }} <i class="bi bi-arrow-right"></i></a></div>
         </div>
     </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-hdd display-4 text-warning"></i>
+                <h3 class="mt-2">{{ logpull_bytes | filesizeformat }}</h3>
+                <p class="text-muted mb-0">{{ _('Log pull data on disk') }}</p>
+            </div>
+            <div class="card-footer"><a href="{{ url_for('admin.storage') }}" class="text-decoration-none">{{ _('Manage Storage') }} <i class="bi bi-arrow-right"></i></a></div>
+        </div>
+    </div>
 </div>
 
 <div class="card">

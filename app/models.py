@@ -929,3 +929,158 @@ class SecurityMetricSnapshot(db.Model):
             'top_ips': self.top_ips,
             'top_urls': self.top_urls,
         }
+
+class LogPull(db.Model):
+    """A log-collection job for the traffic reduction analysis feature.
+
+    Rows live on disk under `instance/log_pulls/<id>/` (see
+    `app.logpull.store`); this row holds the plan, durable progress, and the
+    analysis result.
+
+    **Progress lives here, not only in SocketIO events.** A pull can run for
+    hours, so the user will close the tab, refresh, reconnect from another
+    machine, and survive a service restart. Progress that existed only as
+    emitted events would serve none of that, so the row is the source of
+    truth and SocketIO is the optimization layered on top — the inverse of
+    the weighting SiteProfile uses for its seconds-long probes.
+    """
+    __tablename__ = 'log_pulls'
+
+    STATUS_PENDING = 'pending'
+    STATUS_RUNNING = 'running'
+    STATUS_COMPLETE = 'complete'
+    STATUS_ERROR = 'error'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_INTERRUPTED = 'interrupted'
+    STATUS_ABORTED_DISK = 'aborted_disk'
+
+    #: Statuses from which no further work will happen.
+    TERMINAL_STATUSES = (
+        STATUS_COMPLETE, STATUS_ERROR, STATUS_CANCELLED, STATUS_ABORTED_DISK,
+    )
+    #: Statuses that still occupy the single pull slot.
+    ACTIVE_STATUSES = (STATUS_PENDING, STATUS_RUNNING)
+
+    PHASE_QUEUED = 'queued'
+    PHASE_COUNTING = 'counting'
+    PHASE_FETCHING = 'fetching'
+    PHASE_ANALYZING = 'analyzing'
+    PHASE_DONE = 'done'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('waas_accounts.id', ondelete='CASCADE'),
+                           nullable=False, index=True)
+    app_id = db.Column(db.String(255), nullable=False, index=True)
+    app_name = db.Column(db.String(255), nullable=False)
+
+    # --- plan ---
+    mode = db.Column(db.String(10), nullable=False, default='sample')
+    window_days = db.Column(db.Integer, nullable=False, default=7)
+    range_start = db.Column(db.Integer, nullable=False)   # epoch seconds, inclusive
+    range_end = db.Column(db.Integer, nullable=False)     # epoch seconds, exclusive
+    sample_window_seconds = db.Column(db.Integer, nullable=False, default=300)
+    sample_slot_seconds = db.Column(db.Integer, nullable=False, default=7200)
+
+    # --- lifecycle ---
+    status = db.Column(db.String(20), nullable=False, default=STATUS_PENDING, index=True)
+    session_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
+    cancel_requested = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+    # --- durable progress (throttled writes; never per page) ---
+    phase = db.Column(db.String(20), nullable=False, default=PHASE_QUEUED)
+    rows_expected = db.Column(db.Integer, nullable=False, default=0)
+    rows_fetched = db.Column(db.Integer, nullable=False, default=0)
+    pages_fetched = db.Column(db.Integer, nullable=False, default=0)
+    days_total = db.Column(db.Integer, nullable=False, default=0)
+    days_done = db.Column(db.Integer, nullable=False, default=0)
+    bytes_on_disk = db.Column(db.BigInteger, nullable=False, default=0)
+    current_window_start = db.Column(db.Integer, nullable=True)
+    eta_seconds = db.Column(db.Integer, nullable=True)
+    truncated_windows = db.Column(db.Integer, nullable=False, default=0)
+
+    # --- retention ---
+    raw_expires_at = db.Column(db.DateTime, nullable=True, index=True)
+    raw_deleted = db.Column(db.Boolean, nullable=False, default=False)
+
+    # --- results ---
+    result_data = db.Column(db.Text, nullable=True)   # JSON: aggregates + findings
+    report_data = db.Column(db.Text, nullable=True)   # JSON: rendered report model
+
+    user = db.relationship('User', backref=db.backref('log_pulls', lazy='dynamic'))
+    account = db.relationship('WaasAccount', backref=db.backref('log_pulls', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<LogPull {self.id}: {self.app_name} {self.mode} [{self.status}]>'
+
+    @property
+    def result(self):
+        return json.loads(self.result_data) if self.result_data else None
+
+    @result.setter
+    def result(self, value):
+        self.result_data = json.dumps(value) if value is not None else None
+
+    @property
+    def report(self):
+        return json.loads(self.report_data) if self.report_data else None
+
+    @report.setter
+    def report(self, value):
+        self.report_data = json.dumps(value) if value is not None else None
+
+    @property
+    def is_active(self):
+        return self.status in self.ACTIVE_STATUSES
+
+    @property
+    def percent(self):
+        """Progress as a true fraction of the exact pre-flight row count.
+
+        `rows_expected` comes from a count query made before fetching began,
+        so this is a real denominator rather than an estimate. Capped at 99
+        while running: live traffic can push the actual total past the
+        pre-flight figure, and a bar that reads 100% mid-pull is worse than
+        one that waits.
+        """
+        if self.status == self.STATUS_COMPLETE:
+            return 100
+        if not self.rows_expected:
+            return 0
+        return min(99, int(self.rows_fetched * 100 / self.rows_expected))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'account_id': self.account_id,
+            'app_id': self.app_id,
+            'app_name': self.app_name,
+            'mode': self.mode,
+            'window_days': self.window_days,
+            'range_start': self.range_start,
+            'range_end': self.range_end,
+            'status': self.status,
+            'phase': self.phase,
+            'percent': self.percent,
+            'rows_expected': self.rows_expected,
+            'rows_fetched': self.rows_fetched,
+            'pages_fetched': self.pages_fetched,
+            'days_total': self.days_total,
+            'days_done': self.days_done,
+            'bytes_on_disk': self.bytes_on_disk,
+            'current_window_start': self.current_window_start,
+            'eta_seconds': self.eta_seconds,
+            'truncated_windows': self.truncated_windows,
+            'cancel_requested': self.cancel_requested,
+            'raw_deleted': self.raw_deleted,
+            'raw_expires_at': self.raw_expires_at.isoformat() if self.raw_expires_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'error_message': self.error_message,
+        }

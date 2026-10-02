@@ -223,7 +223,7 @@ def create_app(config_name='default'):
         return {'csrf_token': generate_csrf}
 
     # Register blueprints
-    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features, profiler, config_history, search, review
+    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features, profiler, config_history, search, review, traffic
     from app.routes import help as help_bp
     app.register_blueprint(main.bp)
     app.register_blueprint(auth.bp)
@@ -242,6 +242,7 @@ def create_app(config_name='default'):
     app.register_blueprint(config_history.bp)
     app.register_blueprint(search.bp)
     app.register_blueprint(review.bp)
+    app.register_blueprint(traffic.bp)
 
     # Register SocketIO event handlers
     from app import socketio_events  # noqa: F401
@@ -306,8 +307,17 @@ def create_app(config_name='default'):
             and not app.config.get('TESTING'):
         from app.background_tasks import (
             run_site_profile_cleanup, capture_security_metrics, run_security_metric_cleanup,
+            reconcile_interrupted_pulls, run_log_pull_cleanup,
         )
         from app.report_service import run_scheduled_reports
+
+        # A log pull greenlet does not survive a restart, so any row still
+        # claiming to be running is stale. Mark it interrupted now; its day
+        # checkpoints remain on disk and it can be resumed.
+        try:
+            reconcile_interrupted_pulls(app)
+        except Exception:  # noqa: BLE001 — never block startup on this
+            app.logger.exception('Failed to reconcile interrupted log pulls')
 
         scheduler.init_app(app)
 
@@ -326,6 +336,11 @@ def create_app(config_name='default'):
         @scheduler.task('cron', id='cleanup_security_metrics', hour=3, minute=37, misfire_grace_time=3600)
         def _cleanup_security_metrics_job():
             run_security_metric_cleanup(app)
+
+        # 3:57 keeps the spacing of the two sweeps above.
+        @scheduler.task('cron', id='cleanup_log_pulls', hour=3, minute=57, misfire_grace_time=3600)
+        def _cleanup_log_pulls_job():
+            run_log_pull_cleanup(app)
 
         scheduler.start()
 
