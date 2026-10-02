@@ -12,6 +12,7 @@ from app.waas_client import WaasApiError
 from app.fp_scoring import group_waf_logs
 from app.config_advisor import compute_traffic_stats
 from app.review_service import build_review
+from app import traffic_insights
 from app.routes.applications import get_client_for_account, _site_profile_signal
 from app.routes.logs import QUICK_RANGES
 
@@ -101,6 +102,7 @@ def report(account_id, app_id):
     security_config = {}
     fp_groups = []
     traffic_stats = {}
+    perf_report = None
     site_profile_signal = None
     error = None
 
@@ -118,7 +120,10 @@ def report(account_id, app_id):
             app_id, quick_range=quick_range, items_per_page=1000,
             filter_fields={'LogType': [{'condition': 'is', 'value': 'TR'}]},
         )
-        traffic_stats = compute_traffic_stats(access_result.get('results', []))
+        access_rows = access_result.get('results', [])
+        traffic_stats = compute_traffic_stats(access_rows)
+        perf_report = traffic_insights.analyze(
+            access_rows, total_from_api=access_result.get('count'))
 
         site_profile_signal = _site_profile_signal(account, application)
     except WaasApiError as e:
@@ -151,6 +156,7 @@ def report(account_id, app_id):
         snapshots=[_snapshot_to_dict(s) for s in snapshots],
         metric_snapshots=[m.to_dict() for m in metric_rows],
         baseline=baseline,
+        perf_report=perf_report,
     )
 
     templates = ConfigTemplate.query.filter(

@@ -156,6 +156,12 @@ class TestBuildReview:
         assert review['history_summary'] == {'total_count': 0, 'recent': []}
         assert review['trend_summary'] is None
         assert review['baseline_summary'] is None
+        assert review['performance'] is None
+
+    def test_performance_report_is_passed_through_untouched(self):
+        perf = {'sample': {'rows': 1}, 'findings': []}
+        review = build_review({'protection_mode': 'Active'}, perf_report=perf)
+        assert review['performance'] is perf
 
 
 class StubWaasClient:
@@ -319,3 +325,67 @@ class TestReviewReportRoute:
         resp = logged_in_client.get(f'/review/{account.id}/app1.example.com?quick_range=not_a_real_range')
         assert resp.status_code == 200
         assert stub.quick_ranges_used == ['r_7d', 'r_7d']
+
+
+# Jinja's i18n extension marks _() output safe, so the literal '&' in the
+# heading reaches the response unescaped.
+PERF_CARD_HEADING = b'Performance & Traffic Health'
+
+
+def _access_row(url='/page', status=200, cache_hit=0, time_taken=100, server_time=80):
+    return {
+        'LogType': 'TR', 'URL': url, 'HTTPStatus': status, 'CacheHit': cache_hit,
+        'TimeTaken': time_taken, 'ServerTime': server_time,
+    }
+
+
+class TestReviewReportPerformanceCard:
+    def test_card_renders_with_findings(self, logged_in_client, account, monkeypatch):
+        # 60 uncached static assets -> cache_static_miss, plus origin-bound latency.
+        access_logs = [_access_row(url='/static/app.js', time_taken=900, server_time=850)
+                       for _ in range(60)]
+        stub = StubWaasClient(security={'protection_mode': 'Active'}, access_logs=access_logs)
+        monkeypatch.setattr('app.routes.applications.WaasClient.from_account', lambda acc: stub)
+
+        resp = logged_in_client.get(f'/review/{account.id}/app1.example.com')
+        assert resp.status_code == 200
+        assert PERF_CARD_HEADING in resp.data
+        assert b'Static assets are mostly missing the edge cache' in resp.data
+        assert b'dominated by the origin' in resp.data
+
+    def test_healthy_static_cache_is_not_flagged_on_a_dynamic_heavy_app(
+            self, logged_in_client, account, monkeypatch):
+        """The false positive the static/dynamic split exists to prevent."""
+        access_logs = [_access_row(url='/api/search', cache_hit=0) for _ in range(200)]
+        access_logs += [_access_row(url='/static/app.js', cache_hit=1) for _ in range(40)]
+        access_logs += [_access_row(url='/static/app.js', cache_hit=0) for _ in range(10)]
+        stub = StubWaasClient(security={'protection_mode': 'Active'}, access_logs=access_logs)
+        monkeypatch.setattr('app.routes.applications.WaasClient.from_account', lambda acc: stub)
+
+        resp = logged_in_client.get(f'/review/{account.id}/app1.example.com')
+        assert resp.status_code == 200
+        assert b'Static assets are mostly missing the edge cache' not in resp.data
+
+    def test_low_traffic_app_shows_insufficient_sample_state(
+            self, logged_in_client, account, monkeypatch):
+        access_logs = [_access_row(status=500) for _ in range(5)]
+        stub = StubWaasClient(security={'protection_mode': 'Active'}, access_logs=access_logs)
+        monkeypatch.setattr('app.routes.applications.WaasClient.from_account', lambda acc: stub)
+
+        resp = logged_in_client.get(f'/review/{account.id}/app1.example.com')
+        assert resp.status_code == 200
+        assert b'Not enough traffic to draw conclusions' in resp.data
+        assert b'Origin is returning server errors' not in resp.data
+
+    def test_card_is_omitted_when_the_log_fetch_fails(self, logged_in_client, account, monkeypatch):
+        class FailingLogsStub(StubWaasClient):
+            def get_logs(self, *args, **kwargs):
+                from app.waas_client import WaasApiError
+                raise WaasApiError('boom')
+
+        stub = FailingLogsStub(security={'protection_mode': 'Active'})
+        monkeypatch.setattr('app.routes.applications.WaasClient.from_account', lambda acc: stub)
+
+        resp = logged_in_client.get(f'/review/{account.id}/app1.example.com')
+        assert resp.status_code == 200
+        assert PERF_CARD_HEADING not in resp.data

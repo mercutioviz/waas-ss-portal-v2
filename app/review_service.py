@@ -121,11 +121,16 @@ def _summarize_baseline(security_config, baseline):
 
 
 def build_review(security_config, fp_groups=None, traffic_stats=None, site_profile_signal=None,
-                  snapshots=None, metric_snapshots=None, baseline=None):
+                  snapshots=None, metric_snapshots=None, baseline=None, perf_report=None):
     """Synthesize everything into the review report's data model.
 
     Every argument is a plain dict/list (or None) -- no ORM objects, no
     WaasClient. Callers are responsible for fetching and shaping the data.
+
+    perf_report: output of app.traffic_insights.analyze(), passed through
+        untouched. It stays separate from `recommendations` because that
+        table's Current/Suggested columns presuppose a WaaS config field to
+        change, and a finding like "the origin is slow" has none.
     """
     return {
         'config_summary': _summarize_config(security_config),
@@ -134,4 +139,5 @@ def build_review(security_config, fp_groups=None, traffic_stats=None, site_profi
         'history_summary': _summarize_history(snapshots),
         'trend_summary': _summarize_trend(metric_snapshots),
         'baseline_summary': _summarize_baseline(security_config, baseline),
+        'performance': perf_report,
     }

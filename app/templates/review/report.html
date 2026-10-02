@@ -124,6 +124,118 @@
     </div>
 </div>
 
+{# Performance & Traffic Health #}
+{% macro pct(v) %}{% if v is not none %}{{ '%.1f'|format(v * 100) }}%{% else %}&mdash;{% endif %}{% endmacro %}
+{% macro ms(v) %}{% if v is not none %}{{ v }} ms{% else %}&mdash;{% endif %}{% endmacro %}
+{% set perf = review.performance %}
+{% if perf %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-speedometer2"></i> {{ _('Performance & Traffic Health') }}</h5>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small">
+            {% if perf.sample.truncated %}
+            {{ _('Based on a sample of %(rows)s of %(total)s requests in the selected window.',
+                 rows=perf.sample.rows, total=perf.sample.total_from_api) }}
+            {% else %}
+            {{ _('Based on %(rows)s requests in the selected window.', rows=perf.sample.rows) }}
+            {% endif %}
+        </p>
+
+        {% if perf.sample.insufficient %}
+        <div class="text-muted py-2">
+            <i class="bi bi-info-circle"></i>
+            {{ _('Not enough traffic to draw conclusions (fewer than %(min)s requests). Metrics below are shown for reference only.', min=perf.sample.min_sample) }}
+        </div>
+        {% elif perf.findings %}
+        <div class="list-group mb-3">
+            {% for f in perf.findings %}
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start">
+                    <strong>{{ f.title }}</strong>
+                    <span class="badge {% if f.severity == 'warning' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %}">{{ f.severity }}</span>
+                </div>
+                <div class="small text-muted mt-1">{{ f.detail }}</div>
+                {% if f.evidence.top_uncached_static %}
+                <div class="small mt-2">
+                    <span class="text-muted">{{ _('Most-requested uncached assets:') }}</span>
+                    {% for row in f.evidence.top_uncached_static %}
+                    <div><code>{{ row.url }}</code> &times;{{ row.count }}</div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% if f.evidence.slow_urls %}
+                <div class="small mt-2">
+                    {% for row in f.evidence.slow_urls %}
+                    <div><code>{{ row.url }}</code> &mdash; p95 {{ row.p95_ms }} ms ({{ row.count }} {{ _('requests') }})</div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% if f.evidence.top_404 %}
+                <div class="small mt-2">
+                    <span class="text-muted">{{ _('Top 404 URLs:') }}</span>
+                    {% for row in f.evidence.top_404 %}
+                    <div><code>{{ row.url }}</code> &times;{{ row.count }}</div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% if f.evidence.top_5xx %}
+                <div class="small mt-2">
+                    <span class="text-muted">{{ _('Top 5xx URLs:') }}</span>
+                    {% for row in f.evidence.top_5xx %}
+                    <div><code>{{ row.url }}</code> &times;{{ row.count }}</div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted py-2">
+            <i class="bi bi-check-circle text-success"></i>
+            {{ _('No performance issues found in the observed traffic.') }}
+        </div>
+        {% endif %}
+
+        <div class="row g-3">
+            <div class="col-md-4">
+                <h6 class="text-muted">{{ _('Edge Cache') }}</h6>
+                <table class="table table-sm mb-0">
+                    <tr>
+                        <th>{{ _('Static assets') }}</th>
+                        <td>{{ pct(perf.cache.static_hit_rate) }} <small class="text-muted">({{ perf.cache.static_hits }}/{{ perf.cache.static_total }})</small></td>
+                    </tr>
+                    <tr>
+                        <th>{{ _('Dynamic') }}</th>
+                        <td>{{ pct(perf.cache.dynamic_hit_rate) }} <small class="text-muted">({{ perf.cache.dynamic_hits }}/{{ perf.cache.dynamic_total }})</small></td>
+                    </tr>
+                </table>
+                <small class="text-muted">{{ _('Successful (HTTP 200) responses only. Dynamic responses are expected to miss.') }}</small>
+            </div>
+            <div class="col-md-4">
+                <h6 class="text-muted">{{ _('Latency') }}</h6>
+                <table class="table table-sm mb-0">
+                    <tr><th>{{ _('Total p50 / p95') }}</th><td>{{ ms(perf.latency.total_p50_ms) }} / {{ ms(perf.latency.total_p95_ms) }}</td></tr>
+                    <tr><th>{{ _('Origin p50 / p95') }}</th><td>{{ ms(perf.latency.origin_p50_ms) }} / {{ ms(perf.latency.origin_p95_ms) }}</td></tr>
+                    <tr><th>{{ _('WAF overhead p50 / p95') }}</th><td>{{ ms(perf.latency.overhead_p50_ms) }} / {{ ms(perf.latency.overhead_p95_ms) }}</td></tr>
+                    <tr><th>{{ _('Origin share of p50') }}</th><td>{{ pct(perf.latency.origin_share_p50) }}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-4">
+                <h6 class="text-muted">{{ _('Status Codes') }}</h6>
+                <table class="table table-sm mb-0">
+                    {% for bucket in ['2xx', '3xx', '4xx', '5xx'] %}
+                    <tr><th>{{ bucket }}</th><td>{{ perf.errors.by_class[bucket] }}</td></tr>
+                    {% endfor %}
+                    <tr><th>{{ _('4xx / 5xx rate') }}</th><td>{{ pct(perf.errors.client_error_rate) }} / {{ pct(perf.errors.server_error_rate) }}</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {# FP/FN Scoring (Phase 1) #}
 <div class="card mb-4">
     <div class="card-header"><h5 class="mb-0"><i class="bi bi-search"></i> {{ _('False Positive / Gap Analysis') }} <small class="text-muted">({% for val, label in quick_ranges %}{% if val == quick_range %}{{ label }}{% endif %}{% endfor %})</small></h5></div>
