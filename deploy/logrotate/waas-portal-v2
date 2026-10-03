@@ -1,26 +1,24 @@
 # Log rotation for the WaaS Self-Service Portal v2.
 #
-# CANDIDATE — not yet installed. Review, then copy to
-# /etc/logrotate.d/waas-portal-v2 (root:root 0644).
+# Installed copy lives at /etc/logrotate.d/waas-portal-v2 (root:root 0644).
+# See README.md in this directory for the install and verification steps.
 #
-# Two stanzas, because the four files in logs/ have two different writers
-# with two different reopen behaviours. Rotating them with one rule would
-# silently break one pair or the other.
+# Only two files need rotating here. gunicorn opens both itself (see
+# accesslog/errorlog in gunicorn.conf.py), running as admin, and reopens them
+# on SIGUSR1 — so they rotate by rename plus a signal, with no truncation
+# window and no lost writes.
 #
-#   gunicorn-access.log, gunicorn-error.log
-#       Opened by gunicorn itself (gunicorn.conf.py), running as admin.
-#       Gunicorn reopens its log files on SIGUSR1, so these rotate by rename
-#       and a signal — no truncation window, no lost writes.
+# The unit's own stdout/stderr are deliberately absent. They used to be
+# redirected to logs/gunicorn-stdout.log and logs/gunicorn-stderr.log with
+# StandardOutput=append: / StandardError=append:, which systemd opens as root
+# and then holds for the life of the service with no reopen signal — rotating
+# those needed copytruncate. They now go to the journal instead
+# (StandardOutput=journal), which journald rotates and vacuums on its own:
 #
-#   gunicorn-stderr.log, gunicorn-stdout.log
-#       Not written by gunicorn at all. systemd redirects the unit's stdio
-#       with StandardOutput=append: / StandardError=append:, opening both as
-#       root before dropping to admin — which is why they are root-owned
-#       while the other two are not. systemd holds those descriptors open
-#       for the life of the service and has no reopen signal, so a rename
-#       would leave it writing to the rotated inode and the new file empty
-#       until the next restart. copytruncate is not a preference here, it is
-#       the only correct option.
+#     journalctl -u waas-portal-v2 -f
+#
+# Nothing writes to the two old files any more. If they still exist on disk
+# they are historical; archive or remove them by hand.
 
 /home/admin/waas-ss-portal-v2/logs/gunicorn-access.log
 /home/admin/waas-ss-portal-v2/logs/gunicorn-error.log {
@@ -39,16 +37,4 @@
         # guard keeps a stopped service from turning into a rotation error.
         systemctl kill --kill-whom=main -s USR1 waas-portal-v2 2>/dev/null || true
     endscript
-}
-
-/home/admin/waas-ss-portal-v2/logs/gunicorn-stderr.log
-/home/admin/waas-ss-portal-v2/logs/gunicorn-stdout.log {
-    daily
-    rotate 14
-    missingok
-    notifempty
-    compress
-    delaycompress
-    dateext
-    copytruncate
 }

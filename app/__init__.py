@@ -66,9 +66,14 @@ def create_app(config_name='default'):
 
     # Configure logging - ensure WaaS API client logs are visible
     logging.basicConfig(level=logging.DEBUG if app.debug else logging.INFO)
-    # Set WaaS client logger to DEBUG so we see request/response details
+    # The WaaS client logs request/response detail at DEBUG, including full
+    # headers and the first 500 characters of every response body — which on a
+    # log-pull means real customer traffic rows, at hundreds of requests per
+    # minute. That was 72% of an 86 MB stderr log. INFO keeps the one-line
+    # per-call record and drops the payloads; raise to DEBUG only while
+    # actively debugging the client, and lower it again afterwards.
     waas_logger = logging.getLogger('app.waas_client')
-    waas_logger.setLevel(logging.DEBUG)
+    waas_logger.setLevel(logging.DEBUG if app.debug else logging.INFO)
 
     # Initialize config-specific setup
     config[config_name].init_app(app)

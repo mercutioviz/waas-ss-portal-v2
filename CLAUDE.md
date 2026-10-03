@@ -36,7 +36,9 @@ sudo systemctl restart waas-portal-v2
 sudo journalctl -u waas-portal-v2 -f
 ```
 
-**Logs:** `logs/gunicorn-access.log`, `logs/gunicorn-error.log`, `logs/gunicorn-stdout.log`, `logs/gunicorn-stderr.log`.
+**Logs:** application output (anything the app or a traceback writes) goes to the journal — `journalctl -u waas-portal-v2 -f`. Gunicorn's own two files stay on disk: `logs/gunicorn-error.log` (startup and signals) and `logs/gunicorn-access.log` (always empty — `GeventWebSocketWorker` never calls the access logger; per-request logging comes from nginx). Both are rotated daily by `/etc/logrotate.d/waas-portal-v2`; the source of truth for that config is `deploy/logrotate/`. `logs/gunicorn-stdout.log` and `logs/gunicorn-stderr.log` are historical — nothing has written to them since stdio moved to the journal on 2026-10-03.
+
+The `app.waas_client` logger runs at INFO in production and DEBUG only under `app.debug`. Do not pin it back to DEBUG unconditionally: at DEBUG it logs full request headers and 500 characters of every response body, which during a log pull is customer traffic data at hundreds of lines per minute.
 
 **URL:** https://v2.ssportal.waaslab.com (self-signed cert).
 
