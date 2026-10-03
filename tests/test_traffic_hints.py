@@ -68,16 +68,26 @@ def _bw_row(name, metered=1000, total=10.0, bad=0.5):
 class StubClient:
     """Stands in for WaasClient. Counts are served by patching LogSource."""
 
-    def __init__(self, bandwidth_rows=None, bandwidth_error=None):
+    def __init__(self, bandwidth_rows=None, bandwidth_error=None, apps=None,
+                 upstream='Acme v2 (default account)'):
         self.bandwidth_rows = bandwidth_rows if bandwidth_rows is not None else []
         self.bandwidth_error = bandwidth_error
+        self.upstream = upstream
+        # By default the v4 app list agrees with the bandwidth report, which is
+        # the case when both credentials point at the same WaaS account.
+        self._apps = (apps if apps is not None
+                      else [r['name'] for r in self.bandwidth_rows if r.get('name')])
         self.bandwidth_calls = 0
 
     def get_bandwidth_summary(self, quick_range='r_30d', app_ids=None):
         self.bandwidth_calls += 1
         if self.bandwidth_error:
             raise self.bandwidth_error
-        return {'data': {'bandwidth_data': self.bandwidth_rows}}
+        return {'data': {'bandwidth_data': self.bandwidth_rows},
+                'account': {'name': self.upstream}}
+
+    def list_applications(self):
+        return [{'name': n} for n in self._apps]
 
 
 def patch_counts(monkeypatch, counts, errors=None):
@@ -294,6 +304,70 @@ class TestBandwidthRoute:
     def test_unknown_account_is_404(self, app, db, logged_in_client):
         r = logged_in_client.get('/applications/api/9999/traffic-hints/bandwidth')
         assert r.status_code == 404
+
+    def test_wrong_upstream_account_is_refused(self, app, db, v2_account,
+                                               logged_in_client, monkeypatch):
+        """The v2 login can belong to a different WaaS account than the API key.
+
+        Seen live: two portal accounts sharing one v2 login both received the
+        login's default account, so the second was being offered another
+        account's bytes under its own app names.
+        """
+        stub = StubClient(bandwidth_rows=[_bw_row('somebody-elses-app')],
+                          apps=['our-app-a', 'our-app-b'],
+                          upstream='other.example (default account)')
+        monkeypatch.setattr('app.routes.applications.WaasClient.from_account',
+                            lambda acc: stub)
+
+        body = logged_in_client.get(
+            f'/applications/api/{v2_account.id}/traffic-hints/bandwidth').get_json()
+        assert body['available'] is False
+        assert body['apps'] == {}
+        assert 'other.example' in body['reason']
+        assert AppTrafficSnapshot.query.count() == 0, 'must not cache foreign bytes'
+
+    def test_foreign_apps_are_filtered_out(self, app, db, v2_account,
+                                           logged_in_client, monkeypatch):
+        """Deleted or out-of-scope apps still carry traffic history upstream."""
+        stub = StubClient(bandwidth_rows=[_bw_row('ours'), _bw_row('not-ours')],
+                          apps=['ours'])
+        monkeypatch.setattr('app.routes.applications.WaasClient.from_account',
+                            lambda acc: stub)
+
+        body = logged_in_client.get(
+            f'/applications/api/{v2_account.id}/traffic-hints/bandwidth').get_json()
+        assert body['available'] is True
+        assert list(body['apps']) == ['ours']
+
+    def test_app_list_failure_still_serves_bandwidth(self, app, db, v2_account,
+                                                    logged_in_client, monkeypatch):
+        """The scope check is a guard, not a second dependency to fail on."""
+        stub = StubClient(bandwidth_rows=[_bw_row('a.example.com', metered=2048)])
+        monkeypatch.setattr(stub, 'list_applications',
+                            lambda: (_ for _ in ()).throw(WaasApiError('list down')))
+        monkeypatch.setattr('app.routes.applications.WaasClient.from_account',
+                            lambda acc: stub)
+
+        body = logged_in_client.get(
+            f'/applications/api/{v2_account.id}/traffic-hints/bandwidth').get_json()
+        assert body['available'] is True
+        assert body['apps']['a.example.com']['metered_bytes'] == 2048
+
+
+class TestScopeMatches:
+    def test_overlap_passes(self):
+        assert traffic_hints.scope_matches({'a': {}, 'b': {}}, ['b', 'c'])
+
+    def test_no_overlap_fails(self):
+        assert not traffic_hints.scope_matches({'a': {}}, ['b', 'c'])
+
+    def test_unknown_app_list_does_not_block(self):
+        """A failed app-list lookup must not suppress data we did get."""
+        assert traffic_hints.scope_matches({'a': {}}, set())
+
+    def test_empty_report_is_not_a_mismatch(self):
+        """An account with no traffic reports no rows; that is not a wrong account."""
+        assert traffic_hints.scope_matches({}, ['a', 'b'])
 
 
 class TestRequestsRoute:

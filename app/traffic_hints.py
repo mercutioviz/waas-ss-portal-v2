@@ -98,11 +98,25 @@ def fetch_bandwidth(client, account, quick_range=QUICK_RANGE):
     honest answer there — the data is unavailable, which is different from
     the account having no traffic, and the caller reports it as such.
     """
-    if not account.has_v2_credentials:
-        return {}
+    return fetch_bandwidth_report(client, account, quick_range)[0]
 
-    result = client.get_bandwidth_summary(quick_range=quick_range)
-    rows = ((result or {}).get('data') or {}).get('bandwidth_data') or []
+
+def fetch_bandwidth_report(client, account, quick_range=QUICK_RANGE):
+    """As ``fetch_bandwidth``, plus the name of the account actually reported on.
+
+    The second return value matters because the v2 report endpoints take no
+    account parameter: they describe whichever account the v2 login resolves
+    to, which is not necessarily the account this portal row's API key
+    reaches. Both credentials live on the same ``WaasAccount``, and nothing
+    makes them agree. Callers must check before attributing these numbers to
+    anything — see ``scope_matches``.
+    """
+    if not account.has_v2_credentials:
+        return {}, None
+
+    result = client.get_bandwidth_summary(quick_range=quick_range) or {}
+    rows = (result.get('data') or {}).get('bandwidth_data') or []
+    upstream = (result.get('account') or {}).get('name')
 
     out = {}
     for row in rows:
@@ -117,7 +131,25 @@ def fetch_bandwidth(client, account, quick_range=QUICK_RANGE):
         share = _bad_share(row)
         if share is not None:
             entry['bad_share'] = max(entry['bad_share'] or 0.0, share)
-    return out
+    return out, upstream
+
+
+def scope_matches(measured, app_names):
+    """Do these bandwidth rows describe the apps we are about to label?
+
+    The v2 report family has no account parameter, so a portal account whose
+    API key reaches one WaaS account while its v2 login belongs to another
+    will happily return a full, valid-looking payload for the wrong account.
+    Observed live: two portal rows sharing one v2 login both reported on the
+    login's default account, and the second one's apps appeared nowhere in it.
+
+    Name overlap is the available test — the v4 application list carries no
+    id field to join on. A single shared name is enough, since the alternative
+    is two unrelated accounts coincidentally naming an app alike.
+    """
+    if not measured or not app_names:
+        return True       # nothing to contradict; the caller shows dashes anyway
+    return bool(set(measured) & set(app_names))
 
 
 def fetch_counts(client, app_names, window_days=WINDOW_DAYS, now=None):

@@ -739,9 +739,35 @@ def traffic_hints_bandwidth(account_id):
         })
 
     try:
-        measured = traffic_hints.fetch_bandwidth(client, account)
+        measured, upstream = traffic_hints.fetch_bandwidth_report(client, account)
     except WaasApiError as e:
         return jsonify({'error': str(e)}), 502
+
+    # The v2 report endpoints take no account parameter — they describe the
+    # account the v2 login resolves to, which need not be the one this row's
+    # API key reaches. Confirm the two agree before attributing the numbers,
+    # and before caching them under this account's id.
+    try:
+        app_names = {app.get('name') for app
+                     in _parse_app_list(client.list_applications())
+                     if app.get('name')}
+    except WaasApiError:
+        app_names = set()
+
+    if not traffic_hints.scope_matches(measured, app_names):
+        return jsonify({
+            'available': False,
+            'reason': _('The email login stored on this account reports on '
+                        '"%(upstream)s", which contains none of these '
+                        'applications. Bandwidth cannot be attributed here. '
+                        'Store credentials for this account to see it.',
+                        upstream=upstream or _('a different account')),
+            'apps': {},
+        })
+
+    if app_names:
+        measured = {name: row for name, row in measured.items()
+                    if name in app_names}
 
     stored = traffic_hints.upsert(account.id, measured)
     return jsonify({
