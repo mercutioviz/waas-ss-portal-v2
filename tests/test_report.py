@@ -20,6 +20,7 @@ number, and each test below guards one of those:
   was sent to.
 """
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -321,7 +322,65 @@ class TestMissingAnalyses:
         doc = report.build({**META, 'raw_deleted': True})
         hows = ' '.join(m['how'] for m in doc['missing'])
         assert 'retention window' in hows
-        assert 'Run "Analyze"' not in hows
+        assert '"Analyze"' not in hows
+
+
+class TestMissingEntriesNameRealButtons:
+    """A "how" line is the only navigation the reader gets, so the labels it
+    quotes have to be the labels on the results page. These drifted once: the
+    report said to run "Audit origin headers" against a button that reads
+    "Probe N assets", and the reader could not find the control at all.
+    """
+    @staticmethod
+    def results_template():
+        path = (Path(__file__).resolve().parent.parent / 'app' / 'templates'
+                / 'traffic' / 'results.html')
+        return path.read_text()
+
+    @staticmethod
+    def how_for(doc, what):
+        return next(m['how'] for m in doc['missing'] if m['what'] == what)
+
+    def test_the_analysis_entry_names_the_analyze_button(self):
+        doc = report.build(META)
+        assert '"Analyze"' in self.how_for(doc, 'Log analysis')
+        assert "_('Analyze')" in self.results_template()
+
+    def test_the_audit_entry_names_the_card_and_counts_the_targets(self):
+        doc = report.build(META, analysis=analysis(audit_targets=[{}, {}, {}]),
+                           robots=robots())
+        how = self.how_for(doc, 'Live header audit')
+        assert '"Origin cache headers"' in how
+        assert '"Probe 3 assets"' in how
+        source = self.results_template()
+        assert "_('Origin cache headers')" in source
+        assert "_('Probe %(n)s assets'" in source
+
+    def test_the_robots_entry_names_the_card_and_button(self):
+        doc = report.build(META, analysis=analysis(), header_audit=audit())
+        how = self.how_for(doc, 'robots.txt proposal')
+        assert '"robots.txt proposal"' in how
+        assert '"Generate"' in how
+        source = self.results_template()
+        assert "_('robots.txt proposal')" in source
+        assert "_('Generate')" in source
+
+    def test_an_audit_with_no_eligible_assets_offers_no_button(self):
+        """The button is not rendered when there is nothing to probe, so
+        naming it would send the reader looking for a control that is absent.
+        """
+        doc = report.build(META, analysis=analysis(), robots=robots())
+        how = self.how_for(doc, 'Live header audit')
+        assert 'Probe' not in how
+        assert 'no successful static requests' in how
+
+    def test_an_unanalyzed_pull_is_sent_to_the_analysis_first(self):
+        """With no analysis there are no targets, which is not the same as
+        having looked and found none."""
+        doc = report.build(META)
+        how = self.how_for(doc, 'Live header audit')
+        assert 'analysis first' in how
+        assert 'Probe' not in how
 
 
 class TestGeneratedLimits:

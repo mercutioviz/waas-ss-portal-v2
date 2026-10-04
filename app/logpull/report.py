@@ -237,24 +237,37 @@ def _missing(analysis, header_audit, robots, *, raw_deleted=False):
     fine", which is the one thing this report must never accidentally say.
     """
     out = []
-    if not (analysis or {}).get('findings') and not (analysis or {}).get('sample'):
+    analysis = analysis or {}
+    has_analysis = bool(analysis.get('findings') or analysis.get('sample'))
+    if not has_analysis:
         out.append({
             'what': 'Log analysis',
             'why': 'Cache behaviour, repeat fetches, per-host egress and '
                    'crawler classification all come from this pass.',
-            'how': 'Run "Analyze" on the results page.' if not raw_deleted else
+            'how': 'Click "Analyze" at the top of the results page.'
+                   if not raw_deleted else
                    'The collected rows have passed their retention window; '
                    'this needs a new pull.',
         })
     if not header_audit:
+        targets = len(analysis.get('audit_targets') or [])
+        if not has_analysis:
+            how = ('Run the analysis first — the audit probes the busiest '
+                   'static assets it finds.')
+        elif targets:
+            how = (f'On the results page, find the "Origin cache headers" '
+                   f'card and click "Probe {targets} assets". It sends real '
+                   f'requests to the origin, so it is never automatic.')
+        else:
+            how = ('Nothing to probe: the analysis found no successful static '
+                   'requests on a publicly resolvable host.')
         out.append({
             'what': 'Live header audit',
             'why': 'Only a three-probe conditional replay can tell a broken '
                    'ETag apart from an origin that simply does not support '
                    'conditional requests — and the difference decides whether '
                    'the fix is a one-line header rewrite or a caching redesign.',
-            'how': 'Run "Audit origin headers" on the results page. It sends '
-                   'real requests to the origin, so it is never automatic.',
+            'how': how,
         })
     elif header_audit.get('error'):
         out.append({
@@ -269,7 +282,8 @@ def _missing(analysis, header_audit, robots, *, raw_deleted=False):
             'why': 'Crawl recommendations are only worth making with a '
                    'measured before/after; without this pass there is no '
                    'proposed file and no figure attached to it.',
-            'how': 'Run "Generate and measure" on the results page.'
+            'how': 'On the results page, find the "robots.txt proposal" card '
+                   'and click "Generate".'
                    if not raw_deleted else
                    'The collected rows have passed their retention window; '
                    'a proposal cannot be measured without them.',
