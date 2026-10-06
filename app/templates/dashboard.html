@@ -443,12 +443,41 @@ document.addEventListener('DOMContentLoaded', function() {
     var ipsChart = null;
     var typesChart = null;
 
+    // Give up before nginx does (its proxy_read_timeout on `location /` is the
+    // 60s default), so a slow upstream produces a real message instead of
+    // spinners followed by an unparseable 504 HTML page.
+    var CHART_FETCH_TIMEOUT_MS = 45000;
+
+    var CHART_PANELS = [
+        ['timeline-empty', 'attackTimelineChart'],
+        ['health-empty', 'serverHealthChart'],
+        ['ips-empty', 'topIpsChart'],
+        ['types-empty', 'attackTypesChart']
+    ];
+
     function loadChartData(range) {
         var summaryEl = document.getElementById('chart-summary-requests');
         summaryEl.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+        // text-muted is on the element in the markup and would otherwise win
+        // over the state colours below, so swap it out rather than stacking.
+        summaryEl.classList.remove('text-danger', 'text-warning');
+        summaryEl.classList.add('text-muted');
 
-        fetch('{{ url_for("main.dashboard_chart_data") }}?range=' + range)
-            .then(function(r) { return r.json(); })
+        var controller = new AbortController();
+        var timedOut = false;
+        var timer = setTimeout(function() {
+            timedOut = true;
+            controller.abort();
+        }, CHART_FETCH_TIMEOUT_MS);
+
+        fetch('{{ url_for("main.dashboard_chart_data") }}?range=' + range, { signal: controller.signal })
+            .then(function(r) {
+                clearTimeout(timer);
+                // A 502/504 from nginx is HTML, not JSON — check before parsing
+                // so the failure reports as "server error", not "bad JSON".
+                if (!r.ok) throw new Error('{{ _("Server error") }} (HTTP ' + r.status + ')');
+                return r.json();
+            })
             .then(function(data) {
                 renderTimeline(data.attack_timeline);
                 renderServerHealth(data.server_health);
@@ -456,20 +485,60 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderAttackTypes(data.top_attack_types);
 
                 var s = data.summary;
-                summaryEl.textContent = s.total_requests + ' {{ _("events") }} / ' + s.apps_checked + ' {{ _("apps") }}';
+                var label = s.total_requests + ' {{ _("events") }} / ' + s.apps_checked;
+                if (s.apps_total && s.apps_total > s.apps_checked) {
+                    label += ' {{ _("of") }} ' + s.apps_total;
+                }
+                label += ' {{ _("apps") }}';
+                summaryEl.textContent = label;
+                if (s.partial) {
+                    summaryEl.classList.remove('text-muted');
+                    summaryEl.classList.add('text-warning');
+                    summaryEl.title = '{{ _("Timed out partway through — showing the apps that answered in time.") }}';
+                } else {
+                    summaryEl.title = '';
+                }
+                if (data.errors && data.errors.length) {
+                    console.warn('Chart data partial errors:', data.errors);
+                }
             })
             .catch(function(err) {
+                clearTimeout(timer);
                 console.error('Chart data error:', err);
-                summaryEl.textContent = '{{ _("Failed to load") }}';
-                showEmpty('timeline-empty', 'attackTimelineChart');
-                showEmpty('health-empty', 'serverHealthChart');
-                showEmpty('ips-empty', 'topIpsChart');
-                showEmpty('types-empty', 'attackTypesChart');
+                var msg = timedOut
+                    ? '{{ _("Timed out") }}'
+                    : '{{ _("Failed to load") }}';
+                summaryEl.textContent = msg;
+                summaryEl.classList.remove('text-muted');
+                summaryEl.classList.add('text-danger');
+                // Say the data could not be fetched. Reusing the "no data in
+                // this range" empty state here would claim the account is
+                // quiet when we simply never got an answer.
+                var detail = timedOut
+                    ? '{{ _("The request took too long. Try a shorter time range.") }}'
+                    : '{{ _("Could not load chart data.") }}' + ' ' + (err.message || '');
+                CHART_PANELS.forEach(function(panel) {
+                    showEmpty(panel[0], panel[1], detail);
+                });
             });
     }
 
-    function showEmpty(emptyId, canvasId) {
-        document.getElementById(emptyId).classList.remove('d-none');
+    function showEmpty(emptyId, canvasId, message) {
+        var empty = document.getElementById(emptyId);
+        var text = empty.querySelector('p');
+        if (text) {
+            if (message) {
+                if (!text.dataset.defaultText) text.dataset.defaultText = text.textContent;
+                text.textContent = message;
+                empty.classList.add('text-danger');
+                empty.classList.remove('text-muted');
+            } else if (text.dataset.defaultText) {
+                text.textContent = text.dataset.defaultText;
+                empty.classList.remove('text-danger');
+                empty.classList.add('text-muted');
+            }
+        }
+        empty.classList.remove('d-none');
         document.getElementById(canvasId).style.display = 'none';
     }
 

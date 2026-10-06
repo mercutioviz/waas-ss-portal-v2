@@ -625,7 +625,7 @@ class WaasClient:
 
     # === Logs ===
     def get_logs(self, app_name, quick_range='r_24h', page=1, items_per_page=50,
-                 from_epoch=None, to_epoch=None, filter_fields=None):
+                 from_epoch=None, to_epoch=None, filter_fields=None, timeout=None):
         """Get logs (WAF + access combined) for an application via v4 API.
 
         Args:
@@ -639,6 +639,10 @@ class WaasClient:
             to_epoch: End time as epoch seconds (overrides quick_range)
             filter_fields: Dict of filter fields, e.g.
                 {"ClientIP": [{"condition": "is", "value": "1.2.3.4"}]}
+            timeout: Per-request timeout in seconds. Defaults to the client's
+                ``default_timeout`` (30s). Callers that fan out over many apps
+                under a wall-clock budget should pass something smaller so one
+                hung call cannot consume the whole budget.
 
         Returns:
             dict with 'results' (list of log entries) and 'count' (int)
@@ -657,7 +661,8 @@ class WaasClient:
         if filter_fields:
             params['filterFields'] = json.dumps(filter_fields)
 
-        return self._make_request('GET', f'/applications/{app_name}/logs/', params=params)
+        return self._make_request('GET', f'/applications/{app_name}/logs/', params=params,
+                                  timeout=timeout)
 
     def get_access_logs(self, app_id, params=None):
         """Get access logs for an application (v2 API, legacy).
