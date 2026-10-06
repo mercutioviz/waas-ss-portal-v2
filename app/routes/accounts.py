@@ -1,4 +1,5 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, session
+from flask import (Blueprint, render_template, redirect, url_for, flash, request,
+                   session, jsonify, current_app)
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
 from datetime import datetime
@@ -211,28 +212,86 @@ def verify_account(account_id):
 @login_required
 @limiter.limit("10 per minute")
 def delete_account(account_id):
-    """Delete a WaaS account (owner only)"""
-    account, perm = get_account_for_user(account_id, current_user, min_permission='admin')
+    """Permanently delete a WaaS account and all its portal data (owner only).
+
+    Portal-local: the Barracuda WaaS tenant is never touched.
+    """
+    from app.account_deletion import account_delete_blockers, delete_waas_account
+
+    # require_active=False: a deactivated account must still be deletable.
+    account, perm = get_account_for_user(account_id, current_user,
+                                         require_active=False, min_permission='admin')
     if not account or perm != 'owner':
         flash(_('Only the account owner can delete an account.'), 'danger')
         return redirect(url_for('accounts.list_accounts'))
 
     account_name = account.account_name
 
+    # The dialog gates on this too, but that is JavaScript. An irreversible
+    # delete should not be reachable by a bare POST to the URL. Case-sensitive,
+    # matching CONFIRM_WORD in accounts/_delete_modal.html.
+    if request.form.get('confirm', '').strip() != 'YES':
+        flash(_('Deletion was not confirmed. Nothing was deleted.'), 'warning')
+        return redirect(url_for('accounts.view_account', account_id=account_id))
+
+    blockers = account_delete_blockers(account)
+    if blockers:
+        for blocker in blockers:
+            flash(blocker, 'warning')
+        return redirect(url_for('accounts.view_account', account_id=account_id))
+
+    result = delete_waas_account(account, current_app.instance_path)
+
+    # Audit after the delete commits — AuditLog.log() commits internally, so
+    # logging first would leave a row claiming a delete that then failed.
+    # resource_id now dangles (and SQLite reuses rowids), so the name has to
+    # live in the details text.
+    rows = sum(result['counts'].values())
     AuditLog.log(
         user_id=current_user.id,
         action='account_delete',
         resource_type='waas_account',
-        resource_id=account.id,
-        details=f'Deleted WaaS account: {account_name}',
+        resource_id=account_id,
+        details=(f'Deleted WaaS account: {account_name} '
+                 f'({rows} related row(s), {result["bytes_freed"] / 1e6:.1f} MB freed)'),
         ip_address=request.remote_addr
     )
 
-    db.session.delete(account)
-    db.session.commit()
+    # g.current_account self-heals on the next request, but clearing it here
+    # keeps the redirect from doing a pointless lookup miss.
+    if session.get('current_account_id') == account_id:
+        session.pop('current_account_id', None)
 
-    flash(_('Account "%(name)s" has been deleted.', name=account_name), 'success')
+    flash(_('Account "%(name)s" and its %(rows)d related record(s) have been deleted.',
+            name=account_name, rows=rows), 'success')
     return redirect(url_for('accounts.list_accounts'))
+
+
+@bp.route('/<int:account_id>/delete-impact')
+@login_required
+@limiter.limit("30 per minute")
+def delete_impact(account_id):
+    """JSON summary of what deleting this account would destroy.
+
+    Fetched when the confirmation dialog opens rather than rendered with the
+    list, so the count queries only run when somebody actually opens it.
+    Owner-only, same as the delete itself — otherwise it is a row-count oracle
+    for accounts the caller cannot see.
+    """
+    from app.account_deletion import account_delete_blockers, account_delete_impact
+
+    account, perm = get_account_for_user(account_id, current_user,
+                                         require_active=False, min_permission='admin')
+    if not account or perm != 'owner':
+        return jsonify({'error': 'Not found'}), 404
+
+    impact = account_delete_impact(account)
+    return jsonify({
+        'account_name': account.account_name,
+        'blockers': account_delete_blockers(account),
+        'impact': [row for row in impact if row['count']],
+        'total': sum(row['count'] for row in impact),
+    })
 
 
 @bp.route('/<int:account_id>/rotate-key', methods=['GET', 'POST'])

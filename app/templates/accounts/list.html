@@ -66,6 +66,14 @@
                             <a href="{{ url_for('accounts.view_account', account_id=account.id) }}" class="btn btn-sm btn-outline-primary" aria-label="View"><i class="bi bi-eye"></i></a>
                             <a href="{{ url_for('accounts.edit_account', account_id=account.id) }}" class="btn btn-sm btn-outline-secondary" aria-label="Edit"><i class="bi bi-pencil"></i></a>
                             <a href="{{ url_for('applications.list_applications', account_id=account.id) }}" class="btn btn-sm btn-outline-success"><i class="bi bi-globe"></i> {{ _('Apps') }}</a>
+                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                    data-bs-toggle="modal" data-bs-target="#deleteAccountModal"
+                                    data-account-name="{{ account.account_name }}"
+                                    data-delete-url="{{ url_for('accounts.delete_account', account_id=account.id) }}"
+                                    data-impact-url="{{ url_for('accounts.delete_impact', account_id=account.id) }}"
+                                    aria-label="{{ _('Delete') }}" title="{{ _('Delete account') }}">
+                                <i class="bi bi-trash"></i>
+                            </button>
                         </td>
                     </tr>
                     {% endfor %}
@@ -126,4 +134,6 @@
     </div>
 </div>
 {% endif %}
+
+{% if accounts %}{% include 'accounts/_delete_modal.html' %}{% endif %}
 {% endblock %}

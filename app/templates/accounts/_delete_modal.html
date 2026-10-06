@@ -1,0 +1,165 @@
+{#
+  Confirmation dialog for permanently deleting a WaaS account.
+
+  Included once per page; the trigger buttons carry the per-account data, so
+  there is one copy of this markup no matter how many rows are on the page.
+  Trigger with:
+
+    <button type="button" data-bs-toggle="modal" data-bs-target="#deleteAccountModal"
+            data-account-name="..." data-delete-url="..." data-impact-url="...">
+
+  data-account-name is only used to name the account in the prompt; the
+  confirmation gate is a literal YES (see CONFIRM_WORD below and the matching
+  check in accounts.delete_account).
+
+  Deliberately NOT using the shared #confirmModal from base.html: app.js sets
+  its body with textContent, so it cannot host the impact list or the
+  type-to-confirm input. Do not add data-confirm-message to the form here
+  either — app.js binds every form[data-confirm-message] and would stack that
+  modal on top of this one.
+#}
+<div class="modal fade" id="deleteAccountModal" tabindex="-1" aria-labelledby="deleteAccountModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger" id="deleteAccountModalLabel">
+                    <i class="bi bi-exclamation-triangle-fill"></i> {{ _('Delete account') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <form method="POST" action="" id="deleteAccountForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <p class="mb-3">
+                        {{ _('Permanently delete') }}
+                        <strong id="deleteAccountName" class="text-danger"></strong>?
+                        {{ _('This cannot be undone.') }}
+                    </p>
+
+                    <div id="deleteAccountBlockers" class="alert alert-warning d-none py-2 small mb-3"></div>
+
+                    <p class="small text-muted mb-1">{{ _('This removes from the portal:') }}</p>
+                    <ul class="small mb-3" id="deleteAccountImpact">
+                        <li class="text-muted">
+                            <span class="spinner-border spinner-border-sm" role="status"></span>
+                            {{ _('Checking…') }}
+                        </li>
+                    </ul>
+
+                    <div class="alert alert-info py-2 small">
+                        <i class="bi bi-info-circle"></i>
+                        {{ _('Your Barracuda WaaS account and its applications are not affected. This only removes the portal\'s own record and its stored API credentials.') }}
+                    </div>
+
+                    <label for="deleteAccountConfirm" class="form-label fw-bold text-danger small">
+                        {{ _('Type YES to confirm:') }}
+                    </label>
+                    <input type="text" class="form-control" id="deleteAccountConfirm" name="confirm"
+                           autocomplete="off" spellcheck="false" placeholder="YES"
+                           style="max-width: 10rem; text-transform: none;">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-danger" id="deleteAccountSubmit" disabled>
+                        <i class="bi bi-trash"></i> {{ _('Delete account') }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var modal = document.getElementById('deleteAccountModal');
+    if (!modal) return;
+
+    var form = document.getElementById('deleteAccountForm');
+    var nameEl = document.getElementById('deleteAccountName');
+    var impactEl = document.getElementById('deleteAccountImpact');
+    var blockersEl = document.getElementById('deleteAccountBlockers');
+    var input = document.getElementById('deleteAccountConfirm');
+    var submit = document.getElementById('deleteAccountSubmit');
+    // Case-sensitive on purpose: an all-caps word is deliberate in a way that
+    // "yes" typed on autopilot is not. Kept in sync with accounts.delete_account.
+    var CONFIRM_WORD = 'YES';
+    var accountName = '';
+    var blocked = false;
+
+    function gate() {
+        submit.disabled = blocked || input.value.trim() !== CONFIRM_WORD;
+    }
+
+    modal.addEventListener('show.bs.modal', function (event) {
+        var trigger = event.relatedTarget;
+        if (!trigger) return;
+
+        accountName = trigger.dataset.accountName || '';
+        blocked = false;
+        form.action = trigger.dataset.deleteUrl || '';
+        nameEl.textContent = accountName;
+        input.value = '';
+        submit.disabled = true;
+        blockersEl.classList.add('d-none');
+        blockersEl.textContent = '';
+        impactEl.textContent = '';
+
+        var loading = document.createElement('li');
+        loading.className = 'text-muted';
+        loading.textContent = '{{ _("Checking…") }}';
+        impactEl.appendChild(loading);
+
+        fetch(trigger.dataset.impactUrl)
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function (data) {
+                impactEl.textContent = '';
+
+                if (data.blockers && data.blockers.length) {
+                    blocked = true;
+                    blockersEl.textContent = data.blockers.join(' ');
+                    blockersEl.classList.remove('d-none');
+                }
+
+                if (!data.impact.length) {
+                    var none = document.createElement('li');
+                    none.className = 'text-muted';
+                    none.textContent = '{{ _("the stored API credentials (no other stored data)") }}';
+                    impactEl.appendChild(none);
+                } else {
+                    var creds = document.createElement('li');
+                    creds.textContent = '{{ _("the stored API credentials") }}';
+                    impactEl.appendChild(creds);
+                    // textContent throughout: account names and labels are data.
+                    data.impact.forEach(function (row) {
+                        var li = document.createElement('li');
+                        li.textContent = row.count.toLocaleString() + ' × ' + row.label;
+                        impactEl.appendChild(li);
+                    });
+                }
+                gate();
+            })
+            .catch(function (err) {
+                console.error('Delete impact lookup failed:', err);
+                impactEl.textContent = '';
+                var li = document.createElement('li');
+                li.className = 'text-danger';
+                li.textContent = '{{ _("Could not determine what would be deleted.") }}';
+                impactEl.appendChild(li);
+                // Leave the name gate as the only guard rather than blocking —
+                // the server re-checks both the name and the blockers anyway.
+                gate();
+            });
+    });
+
+    input.addEventListener('input', gate);
+
+    // Enter in the text field submits the form without going through the
+    // button, so gate that path too.
+    form.addEventListener('submit', function (e) {
+        if (blocked || input.value.trim() !== CONFIRM_WORD) e.preventDefault();
+    });
+});
+</script>

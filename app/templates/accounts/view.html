@@ -35,9 +35,21 @@
         <a href="{{ url_for('accounts.edit_account', account_id=account.id) }}" class="btn btn-outline-warning"><i class="bi bi-pencil"></i> {{ _('Edit') }}</a>
         <a href="{{ url_for('accounts.sharing', account_id=account.id) }}" class="btn btn-outline-secondary"><i class="bi bi-people"></i> {{ _('Sharing') }}</a>
         {% endif %}
+        {% if permission == 'owner' %}
+        <button type="button" class="btn btn-outline-danger"
+                data-bs-toggle="modal" data-bs-target="#deleteAccountModal"
+                data-account-name="{{ account.account_name }}"
+                data-delete-url="{{ url_for('accounts.delete_account', account_id=account.id) }}"
+                data-impact-url="{{ url_for('accounts.delete_impact', account_id=account.id) }}"
+                title="{{ _('Delete account') }}">
+            <i class="bi bi-trash"></i> {{ _('Delete') }}
+        </button>
+        {% endif %}
         <a href="{{ url_for('accounts.list_accounts') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> {{ _('Back') }}</a>
     </div>
 </div>
+
+{% if permission == 'owner' %}{% include 'accounts/_delete_modal.html' %}{% endif %}
 
 <div class="row g-4">
     <div class="col-md-6">
