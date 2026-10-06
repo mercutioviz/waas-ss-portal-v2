@@ -13,9 +13,54 @@ body {
     min-height: 100vh;
 }
 
-/* Main content offset for fixed-top navbar */
+/* Main content offset for the fixed-top navbar.
+   Measured at runtime into --waas-navbar-h by app.js rather than hardcoded,
+   because the navbar is allowed to wrap to a second row (see below) and a
+   fixed 70px would hide the top of the page behind it when it does. The
+   fallback matches Bootstrap's single-row navbar height. */
 .main-content {
-    padding-top: 70px;
+    padding-top: calc(var(--waas-navbar-h, 56px) + 14px);
+}
+
+/* The navbar carries 7 menus plus 6 utilities and needs ~1500px to lay out in
+   one row — more in Spanish, more again with a long account name scoped. Above
+   the expand breakpoint it is allowed to wrap instead of overflowing its
+   container, which is what used to push the user menu (and Logout) off the
+   right-hand edge with no scrollbar to reach it. */
+.navbar-expand-xxl .navbar-nav {
+    flex-wrap: wrap;
+}
+
+/* Keep the account-scope chip from setting the navbar's width. */
+.waas-scope-label {
+    display: inline-block;
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+/* The utility cluster lives outside the collapse, so below the expand
+   breakpoint it sits inline between the brand and the toggler. */
+.waas-navbar-utils {
+    /* Breathing room only while collapsed, where these sit shoulder-to-shoulder
+       with the brand and the toggler. Once expanded the nav-link padding
+       already separates them, and the gap costs ~19px of a budget tight enough
+       to decide whether 1536px (1920 at 125% scaling) wraps. */
+    gap: 0.35rem;
+}
+
+@media (max-width: 1399.98px) {
+    .waas-navbar-utils {
+        margin-right: 0.5rem;
+    }
+}
+
+@media (min-width: 1400px) {
+    .waas-navbar-utils {
+        gap: 0;
+    }
 }
 
 /* Navbar */

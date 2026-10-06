@@ -391,5 +391,46 @@ document.addEventListener('DOMContentLoaded', function () {
         return html || '<div class="text-muted p-3">No changes detected.</div>';
     };
 
+    // -------------------------------------------------------
+    // Keep the main content clear of the fixed-top navbar
+    // -------------------------------------------------------
+    // The navbar is allowed to wrap to a second row when its contents cannot
+    // fit (long account name, a locale with longer labels, a narrow window), so
+    // the content offset has to follow its real height rather than assume one
+    // row. CSS reads this as --waas-navbar-h.
+    (function () {
+        var navbar = document.querySelector('.navbar.fixed-top');
+        if (!navbar) return;
+
+        var collapse = document.getElementById('navbarMain');
+
+        function syncNavbarHeight() {
+            // While the hamburger menu is open the navbar is temporarily tall
+            // and simply overlays the page, as Bootstrap intends — measuring it
+            // then would shove the whole page down and snap back on close.
+            if (collapse && collapse.classList.contains('show')) return;
+            document.documentElement.style.setProperty(
+                '--waas-navbar-h', navbar.offsetHeight + 'px'
+            );
+        }
+
+        syncNavbarHeight();
+
+        if (window.ResizeObserver) {
+            // Catches wrap/unwrap from zoom and font loading too, not just resize.
+            new ResizeObserver(syncNavbarHeight).observe(navbar);
+        } else {
+            var resizeTimer = null;
+            window.addEventListener('resize', function () {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(syncNavbarHeight, 100);
+            });
+        }
+
+        if (collapse) {
+            collapse.addEventListener('hidden.bs.collapse', syncNavbarHeight);
+        }
+    })();
+
     console.log('WaaS Portal initialized.');
 });

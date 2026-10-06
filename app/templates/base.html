@@ -18,14 +18,153 @@
 <body{% if current_user.is_authenticated %} data-authenticated="true"{% endif %}>
     <a href="#main-content" class="visually-hidden-focusable position-absolute p-2 bg-primary text-white">{{ _('Skip to main content') }}</a>
     <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
+    {# navbar-expand-xxl, not -lg: the bar needs ~1500px once the utility
+       cluster is counted, so collapsing only below 992px left every laptop
+       width between the two silently clipping its right-hand end. The utility
+       <ul> below sits outside the collapse so the account switcher, theme,
+       notifications and the user menu stay reachable at every width. #}
+    <nav class="navbar navbar-expand-xxl navbar-dark bg-primary fixed-top">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('main.dashboard') if current_user.is_authenticated else url_for('auth.login') }}">
                 <i class="bi bi-shield-lock"></i> WaaS Portal
             </a>
+            {% if current_user.is_authenticated %}
+            <ul class="navbar-nav flex-row align-items-center order-xxl-last ms-auto ms-xxl-0 waas-navbar-utils">
+                <li class="nav-item">
+                    <button class="btn nav-link" id="paletteTrigger" title="{{ _('Search') }} (Ctrl+K)" aria-label="{{ _('Search') }}" type="button">
+                        <i class="bi bi-search"></i>
+                    </button>
+                </li>
+                {% if switchable_accounts %}
+                <li class="nav-item dropdown" id="accountSwitcher">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-building"></i>
+                        {# Capped width: an account name like "Diversified Computer
+                           Supplies" would otherwise set the navbar's width. #}
+                        <span class="waas-scope-label"
+                              title="{{ current_account.account_name if current_account else _('Select account') }}">
+                            {% if current_account %}<strong>{{ current_account.account_name }}</strong>{% else %}{{ _('Select account') }}{% endif %}
+                        </span>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:220px;max-height:400px;overflow-y:auto;">
+                        <li class="dropdown-header">{{ _('Account scope') }}</li>
+                        {% for acct in switchable_accounts %}
+                        <li>
+                            <form method="post" action="{{ url_for('accounts.switch_account') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="account_id" value="{{ acct.id }}">
+                                <input type="hidden" name="next" value="{{ request.path }}">
+                                <button type="submit" class="dropdown-item {% if current_account and acct.id == current_account.id %}active{% endif %}">
+                                    {{ acct.account_name }}
+                                </button>
+                            </form>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </li>
+                {% endif %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-translate"></i> {% if get_locale() == 'es' %}ES{% else %}EN{% endif %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <form method="post" action="{{ url_for('auth.set_locale') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="locale" value="en">
+                                <input type="hidden" name="next" value="{{ request.url }}">
+                                <button type="submit" class="dropdown-item {% if get_locale() == 'en' %}active{% endif %}">English</button>
+                            </form>
+                        </li>
+                        <li>
+                            <form method="post" action="{{ url_for('auth.set_locale') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="locale" value="es">
+                                <input type="hidden" name="next" value="{{ request.url }}">
+                                <button type="submit" class="dropdown-item {% if get_locale() == 'es' %}active{% endif %}">Español</button>
+                            </form>
+                        </li>
+                    </ul>
+                </li>
+                <li class="nav-item">
+                    <button class="btn nav-link" id="themeToggle" title="{{ _('Toggle theme') }}">
+                        <i class="bi bi-sun-fill" id="themeIconLight"></i>
+                        <i class="bi bi-moon-fill" id="themeIconDark"></i>
+                    </button>
+                </li>
+                <li class="nav-item dropdown" id="notificationBell">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false" id="notificationDropdownToggle">
+                        <i class="bi bi-bell"></i>
+                        <span class="badge bg-danger rounded-pill d-none" id="notifBadge">0</span>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:320px;max-height:400px;overflow-y:auto;" id="notificationDropdown">
+                        <li class="dropdown-header d-flex justify-content-between align-items-center">
+                            <span>{{ _('Notifications') }}</span>
+                            <button class="btn btn-link btn-sm p-0" id="markAllReadBtn" style="font-size:.8rem;">{{ _('Mark All Read') }}</button>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li id="notifLoading" class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"></div></li>
+                        <li id="notifEmpty" class="text-center text-muted py-3 d-none">{{ _('No notifications') }}</li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-center small" href="{{ url_for('auth.notifications') }}">{{ _('View All Notifications') }}</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown"
+                       title="{{ current_user.display_name }}" aria-label="{{ current_user.display_name }}">
+                        <i class="bi bi-person-circle"></i>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        {# The name moved in here: as a navbar label it cost 163px,
+                           the second-widest thing in the bar. #}
+                        <li><span class="dropdown-item-text fw-semibold">{{ current_user.display_name }}</span></li>
+                        <li><span class="dropdown-item-text text-muted small pt-0">{{ _('Role') }}: {{ current_user.role }}</span></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}"><i class="bi bi-person"></i> {{ _('Profile') }}</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}"><i class="bi bi-lock"></i> {{ _('Change Password') }}</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-right"></i> {{ _('Logout') }}</a></li>
+                    </ul>
+                </li>
+            </ul>
+            {% else %}
+            <ul class="navbar-nav flex-row align-items-center ms-auto waas-navbar-utils">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-translate"></i> {% if get_locale() == 'es' %}ES{% else %}EN{% endif %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <form method="post" action="{{ url_for('auth.set_locale') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="locale" value="en">
+                                <input type="hidden" name="next" value="{{ request.url }}">
+                                <button type="submit" class="dropdown-item {% if get_locale() == 'en' %}active{% endif %}">English</button>
+                            </form>
+                        </li>
+                        <li>
+                            <form method="post" action="{{ url_for('auth.set_locale') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="locale" value="es">
+                                <input type="hidden" name="next" value="{{ request.url }}">
+                                <button type="submit" class="dropdown-item {% if get_locale() == 'es' %}active{% endif %}">Español</button>
+                            </form>
+                        </li>
+                    </ul>
+                </li>
+                <li class="nav-item">
+                    <button class="btn nav-link" id="themeToggleAnon" title="{{ _('Toggle theme') }}">
+                        <i class="bi bi-sun-fill theme-icon-light"></i>
+                        <i class="bi bi-moon-fill theme-icon-dark"></i>
+                    </button>
+                </li>
+            </ul>
+            {% endif %}
+            {% if current_user.is_authenticated %}
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
                 <span class="navbar-toggler-icon"></span>
             </button>
+            {% endif %}
             <div class="collapse navbar-collapse" id="navbarMain">
                 {% if current_user.is_authenticated %}
                 {% set ep = request.endpoint or '' %}
@@ -105,127 +244,6 @@
                         </ul>
                     </li>
                     {% endif %}
-                </ul>
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <button class="btn nav-link" id="paletteTrigger" title="{{ _('Search') }} (Ctrl+K)" aria-label="{{ _('Search') }}" type="button">
-                            <i class="bi bi-search"></i>
-                        </button>
-                    </li>
-                    {% if switchable_accounts %}
-                    <li class="nav-item dropdown" id="accountSwitcher">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-building"></i>
-                            {% if current_account %}<strong>{{ current_account.account_name }}</strong>{% else %}{{ _('Select account') }}{% endif %}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:220px;max-height:400px;overflow-y:auto;">
-                            <li class="dropdown-header">{{ _('Account scope') }}</li>
-                            {% for acct in switchable_accounts %}
-                            <li>
-                                <form method="post" action="{{ url_for('accounts.switch_account') }}">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="account_id" value="{{ acct.id }}">
-                                    <input type="hidden" name="next" value="{{ request.path }}">
-                                    <button type="submit" class="dropdown-item {% if current_account and acct.id == current_account.id %}active{% endif %}">
-                                        {{ acct.account_name }}
-                                    </button>
-                                </form>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </li>
-                    {% endif %}
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-translate"></i> {% if get_locale() == 'es' %}ES{% else %}EN{% endif %}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li>
-                                <form method="post" action="{{ url_for('auth.set_locale') }}">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="locale" value="en">
-                                    <input type="hidden" name="next" value="{{ request.url }}">
-                                    <button type="submit" class="dropdown-item {% if get_locale() == 'en' %}active{% endif %}">English</button>
-                                </form>
-                            </li>
-                            <li>
-                                <form method="post" action="{{ url_for('auth.set_locale') }}">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="locale" value="es">
-                                    <input type="hidden" name="next" value="{{ request.url }}">
-                                    <button type="submit" class="dropdown-item {% if get_locale() == 'es' %}active{% endif %}">Español</button>
-                                </form>
-                            </li>
-                        </ul>
-                    </li>
-                    <li class="nav-item">
-                        <button class="btn nav-link" id="themeToggle" title="{{ _('Toggle theme') }}">
-                            <i class="bi bi-sun-fill" id="themeIconLight"></i>
-                            <i class="bi bi-moon-fill" id="themeIconDark"></i>
-                        </button>
-                    </li>
-                    <li class="nav-item dropdown" id="notificationBell">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false" id="notificationDropdownToggle">
-                            <i class="bi bi-bell"></i>
-                            <span class="badge bg-danger rounded-pill d-none" id="notifBadge">0</span>
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:320px;max-height:400px;overflow-y:auto;" id="notificationDropdown">
-                            <li class="dropdown-header d-flex justify-content-between align-items-center">
-                                <span>{{ _('Notifications') }}</span>
-                                <button class="btn btn-link btn-sm p-0" id="markAllReadBtn" style="font-size:.8rem;">{{ _('Mark All Read') }}</button>
-                            </li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li id="notifLoading" class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"></div></li>
-                            <li id="notifEmpty" class="text-center text-muted py-3 d-none">{{ _('No notifications') }}</li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item text-center small" href="{{ url_for('auth.notifications') }}">{{ _('View All Notifications') }}</a></li>
-                        </ul>
-                    </li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-person-circle"></i> {{ current_user.display_name }}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><span class="dropdown-item-text text-muted small">{{ _('Role') }}: {{ current_user.role }}</span></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}"><i class="bi bi-person"></i> {{ _('Profile') }}</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}"><i class="bi bi-lock"></i> {{ _('Change Password') }}</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-right"></i> {{ _('Logout') }}</a></li>
-                        </ul>
-                    </li>
-                </ul>
-                {% else %}
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-translate"></i> {% if get_locale() == 'es' %}ES{% else %}EN{% endif %}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li>
-                                <form method="post" action="{{ url_for('auth.set_locale') }}">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="locale" value="en">
-                                    <input type="hidden" name="next" value="{{ request.url }}">
-                                    <button type="submit" class="dropdown-item {% if get_locale() == 'en' %}active{% endif %}">English</button>
-                                </form>
-                            </li>
-                            <li>
-                                <form method="post" action="{{ url_for('auth.set_locale') }}">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="locale" value="es">
-                                    <input type="hidden" name="next" value="{{ request.url }}">
-                                    <button type="submit" class="dropdown-item {% if get_locale() == 'es' %}active{% endif %}">Español</button>
-                                </form>
-                            </li>
-                        </ul>
-                    </li>
-                    <li class="nav-item">
-                        <button class="btn nav-link" id="themeToggleAnon" title="{{ _('Toggle theme') }}">
-                            <i class="bi bi-sun-fill theme-icon-light"></i>
-                            <i class="bi bi-moon-fill theme-icon-dark"></i>
-                        </button>
-                    </li>
                 </ul>
                 {% endif %}
             </div>
