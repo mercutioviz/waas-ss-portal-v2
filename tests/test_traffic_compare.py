@@ -429,6 +429,36 @@ def test_timeline_omits_empty_buckets_rather_than_zero_filling(tmp_path):
     assert [b['start'] for b in data['bins']] == [0, 1800]
 
 
+def test_timeline_reports_partial_edge_buckets_as_partial(tmp_path):
+    from app.logpull.compare import bucket_seconds, timeline
+
+    # A window from 00:07 to 00:25 covers 3 minutes of the 00:00 bucket and
+    # 5 of the 00:20 one. Scaling those as full buckets draws a dip at each
+    # end of the chart that the traffic never had.
+    store = timeline_store(tmp_path, {
+        'before': [at(420, sent=10), at(700, sent=10), at(1300, sent=10)],
+    })
+    data = timeline(store, ('before',), bucket=600, bounds=[(420, 1500)])
+    seconds = {b['start']: b['seconds'] for b in data['bins']}
+    assert seconds == {0: 180, 600: 600, 1200: 300}
+
+
+def test_bucket_seconds_is_nominal_without_bounds():
+    from app.logpull.compare import bucket_seconds
+
+    assert bucket_seconds(0, 600, None) == 600
+    assert bucket_seconds(0, 600, []) == 600
+
+
+def test_bucket_seconds_sums_across_two_disjoint_windows():
+    from app.logpull.compare import bucket_seconds
+
+    # `before` and `after` are a guard apart, so a bucket can straddle the gap
+    # and be covered by both windows for part of its span.
+    bounds = [(0, 200), (400, 1000)]
+    assert bucket_seconds(0, 600, bounds) == 400
+
+
 def test_timeline_skips_rows_with_an_unparseable_timestamp(tmp_path):
     from app.logpull.compare import timeline
 

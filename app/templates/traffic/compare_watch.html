@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Measuring a change') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Traffic Analysis'), url_for('traffic.index')),
+    (_('Comparisons'), url_for('traffic_compare.index')),
+    (_('Progress'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-3">
+    <h2><i class="bi bi-arrow-left-right"></i> {{ _('Measuring') }}
+        <code class="fs-5">{{ comparison.app_name }}</code></h2>
+    <p class="text-muted mb-0">
+        {{ _('Change at %(when)s UTC.', when=comparison.change_at | epoch_s) }}
+        {{ _('You can close this page — collection continues and progress is saved.') }}
+    </p>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="d-flex justify-content-between mb-1">
+            <span id="phaseLabel">{{ _('Connecting...') }}</span>
+            <span id="etaLabel" class="text-muted"></span>
+        </div>
+        <div class="progress mb-3" style="height: 24px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar"
+                 role="progressbar" style="width: {{ comparison.percent }}%">{{ comparison.percent }}%</div>
+        </div>
+
+        <div id="waitBanner" class="alert alert-primary d-none">
+            <i class="bi bi-clock-history"></i>
+            <span id="waitText"></span>
+            <div class="small mt-1">
+                {{ _('Nothing is stuck. The window after your change has not finished
+                     elapsing yet — the portal collects it automatically and will
+                     notify you. It is safe to close this page.') }}
+            </div>
+        </div>
+
+        <div class="row text-center g-3">
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Requests collected') }}</div>
+                <div class="fs-5" id="rowsLabel">{{ '{:,}'.format(comparison.rows_fetched) }}</div>
+                <div class="text-muted small">{{ _('of ~%(n)s', n='{:,}'.format(comparison.rows_expected)) }}</div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Windows') }}</div>
+                <div class="fs-5" id="windowsLabel">{{ comparison.windows_done }} / {{ comparison.windows_total }}</div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Control days') }}</div>
+                <div class="fs-5">{{ comparison.control_days }}</div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted small">{{ _('Status') }}</div>
+                <div class="fs-5">
+                    <span class="badge {{ status_badges.get(comparison.status, 'bg-secondary') }}"
+                          id="statusBadge">{{ comparison.status }}</span>
+                </div>
+            </div>
+        </div>
+
+        <hr>
+        <div class="text-muted small mb-2">{{ _('Windows') }}</div>
+        <ul class="list-unstyled mb-0" id="windowList"></ul>
+
+        <div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+    </div>
+    <div class="card-footer d-flex justify-content-between align-items-center">
+        <span class="text-muted small">{{ _('Comparison #%(id)s', id=comparison.id) }}</span>
+        <form method="post" action="{{ url_for('traffic_compare.cancel', comparison_id=comparison.id) }}"
+              onsubmit="return confirm('{{ _('Cancel this comparison? Windows already collected are kept.') }}');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger" id="cancelBtn">
+                <i class="bi bi-x-circle"></i> {{ _('Cancel') }}
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function () {
+    var sessionId = {{ session_id | tojson }};
+    var statusUrl = {{ url_for('traffic_compare.status', comparison_id=comparison.id) | tojson }};
+    var resultsUrl = {{ url_for('traffic_compare.results', comparison_id=comparison.id) | tojson }};
+    var terminal = ['complete', 'error', 'cancelled'];
+
+    var badges = {
+        pending: 'bg-secondary', collecting: 'bg-info', waiting: 'bg-primary',
+        analyzing: 'bg-info', complete: 'bg-success', error: 'bg-danger',
+        cancelled: 'bg-warning text-dark', interrupted: 'bg-warning text-dark'
+    };
+
+    // The bar can sit still for a minute at a time while one window drains,
+    // and it does not move at all while a window is being sized. The text is
+    // what tells the user something is happening, so it always names the
+    // window and its position in the run.
+    function phaseText(d) {
+        if (d.status === 'waiting') { return {{ _('Waiting for the window after your change') | tojson }}; }
+        if (d.status === 'analyzing') { return {{ _('Analysing collected traffic...') | tojson }}; }
+        if (d.status === 'complete') { return {{ _('Done') | tojson }}; }
+        if (d.status === 'interrupted') { return {{ _('Interrupted — will resume automatically') | tojson }}; }
+        if (d.current_label) {
+            var position = Math.min(d.windows_done + 1, d.windows_total);
+            return '{{ _("Collecting") }} ' + d.current_label
+                 + ' (' + position + ' {{ _("of") }} ' + d.windows_total + ')';
+        }
+        if (d.status === 'collecting' || d.status === 'pending') {
+            return {{ _('Sizing windows...') | tojson }};
+        }
+        return d.status;
+    }
+
+    var icons = {
+        complete: '<i class="bi bi-check-circle-fill text-success"></i>',
+        running: '<span class="spinner-border spinner-border-sm text-info"></span>',
+        pending: '<i class="bi bi-circle text-muted"></i>',
+        error: '<i class="bi bi-x-circle-fill text-danger"></i>',
+        cancelled: '<i class="bi bi-slash-circle text-warning"></i>',
+        interrupted: '<i class="bi bi-pause-circle text-warning"></i>',
+        aborted_disk: '<i class="bi bi-x-circle-fill text-danger"></i>'
+    };
+
+    function renderWindows(d) {
+        var list = document.getElementById('windowList');
+        var html = '';
+        (d.windows || []).forEach(function (w) {
+            var icon = icons[w.status] || icons.pending;
+            html += '<li class="d-flex justify-content-between py-1 border-bottom">'
+                  + '<span>' + icon + ' <code class="ms-1">' + w.label + '</code></span>'
+                  + '<span class="text-muted small">'
+                  + w.rows_fetched.toLocaleString() + ' {{ _("requests") }}'
+                  + (w.status === 'running' ? ' · ' + w.percent + '%' : '')
+                  + '</span></li>';
+        });
+        // The after window has no row until it is due, so it is listed from
+        // the plan rather than from the children.
+        if ((d.windows || []).length < d.windows_total) {
+            html += '<li class="d-flex justify-content-between py-1 border-bottom">'
+                  + '<span>' + icons.pending + ' <code class="ms-1">after</code></span>'
+                  + '<span class="text-muted small">{{ _("not yet elapsed") }}</span></li>';
+        }
+        list.innerHTML = html;
+    }
+
+    function render(d) {
+        var bar = document.getElementById('progressBar');
+        bar.style.width = d.percent + '%';
+        bar.textContent = d.percent + '%';
+
+        document.getElementById('phaseLabel').textContent = phaseText(d);
+        document.getElementById('rowsLabel').textContent = d.rows_fetched.toLocaleString();
+        document.getElementById('windowsLabel').textContent =
+            d.windows_done + ' / ' + d.windows_total;
+
+        var badge = document.getElementById('statusBadge');
+        badge.textContent = d.status;
+        badge.className = 'badge ' + (badges[d.status] || 'bg-secondary');
+
+        document.getElementById('etaLabel').textContent =
+            d.eta_label ? '{{ _("about") }} ' + d.eta_label + ' {{ _("remaining") }}' : '';
+
+        var wait = document.getElementById('waitBanner');
+        if (d.status === 'waiting' && d.waiting_label) {
+            document.getElementById('waitText').textContent =
+                '{{ _("The after window can be collected in") }} ' + d.waiting_label + '.';
+            wait.classList.remove('d-none');
+        } else {
+            wait.classList.add('d-none');
+        }
+
+        if (d.error_message) {
+            var box = document.getElementById('errorBox');
+            box.textContent = d.error_message;
+            box.classList.remove('d-none');
+        }
+
+        renderWindows(d);
+
+        if (terminal.indexOf(d.status) !== -1) {
+            bar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+            document.getElementById('cancelBtn').disabled = true;
+            if (d.status === 'complete') { window.location.href = resultsUrl; }
+            return true;
+        }
+        return false;
+    }
+
+    // The row is the source of truth, not the event stream. A comparison
+    // outlives the tab it was started from, and during the wait for the final
+    // window it outlives the SocketIO connection entirely.
+    function poll() {
+        fetch(statusUrl, {credentials: 'same-origin'})
+            .then(function (r) { return r.json(); })
+            .then(function (d) { if (render(d)) { clearInterval(timer); } })
+            .catch(function () { /* transient; the next tick retries */ });
+    }
+
+    poll();
+    var timer = setInterval(poll, 5000);
+
+    var socket = io({transports: ['polling'], upgrade: false});
+    function joinRoom() { socket.emit('join', {room: sessionId}); }
+    socket.on('connect', joinRoom);
+    socket.io.on('reconnect', joinRoom);
+    socket.on('comparison_progress', function (d) {
+        if (render(d)) { clearInterval(timer); socket.disconnect(); }
+    });
+})();
+</script>
+{% endblock %}

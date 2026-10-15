@@ -219,6 +219,7 @@
                             <li><a class="dropdown-item {% if ep.startswith('config_history.') %}active{% endif %}" href="{{ url_for('config_history.list_snapshots') }}"><i class="bi bi-clock-history"></i> {{ _('Config History') }}</a></li>
                             <li><a class="dropdown-item {% if ep.startswith('review.') %}active{% endif %}" href="{{ url_for('review.index') }}"><i class="bi bi-clipboard2-data"></i> {{ _('Account/Config Review') }}</a></li>
                             <li><a class="dropdown-item {% if ep.startswith('traffic.') %}active{% endif %}" href="{{ url_for('traffic.index') }}"><i class="bi bi-graph-down-arrow"></i> {{ _('Traffic Analysis') }}</a></li>
+                            <li><a class="dropdown-item {% if ep.startswith('traffic_compare.') %}active{% endif %}" href="{{ url_for('traffic_compare.index') }}"><i class="bi bi-arrow-left-right"></i> {{ _('Before/After') }}</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">

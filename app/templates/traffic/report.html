@@ -29,9 +29,9 @@
         <p class="text-muted mb-0">
             <code>{{ doc.meta.app_name }}</code>
             {% if doc.meta.account_name %} · {{ doc.meta.account_name }}{% endif %}
-            · {{ doc.meta.period_start.strftime('%Y-%m-%d') }} → {{ doc.meta.period_end.strftime('%Y-%m-%d') }} UTC
-            · {{ _('%(mode)s collection over %(days)s days',
-                   mode=doc.meta.mode|capitalize, days=doc.meta.window_days) }}
+            · {{ doc.meta.period_label }}
+            · {{ _('%(mode)s collection over %(span)s',
+                   mode=doc.meta.mode|capitalize, span=doc.meta.range_label) }}
         </p>
     </div>
     <div class="d-flex gap-2">

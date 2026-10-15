@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import or_
@@ -1064,6 +1064,17 @@ class LogPull(db.Model):
     # --- retention ---
     raw_expires_at = db.Column(db.DateTime, nullable=True, index=True)
     raw_deleted = db.Column(db.Boolean, nullable=False, default=False)
+    #: Exempt from the nightly raw sweep. Set on the windows of a comparison
+    #: the user has pinned, so a baseline stays re-analysable.
+    pinned = db.Column(db.Boolean, nullable=False, default=False)
+
+    # --- comparison membership ---
+    #: Set when this pull is one window of a `TrafficComparison`. Null for an
+    #: ordinary standalone pull, which is still the common case.
+    comparison_id = db.Column(
+        db.Integer, db.ForeignKey('traffic_comparisons.id', ondelete='CASCADE'),
+        nullable=True, index=True)
+    window_label = db.Column(db.String(40), nullable=True)
 
     # --- results ---
     result_data = db.Column(db.Text, nullable=True)   # JSON: aggregates + findings
@@ -1111,6 +1122,43 @@ class LogPull(db.Model):
             return 0
         return min(99, int(self.rows_fetched * 100 / self.rows_expected))
 
+    @property
+    def range_seconds(self):
+        return max(0, (self.range_end or 0) - (self.range_start or 0))
+
+    @property
+    def range_label(self):
+        """Compact span of the collected range — `7d`, `2h`, `90m`.
+
+        Derived from the range rather than from `window_days`, because a
+        custom range need not be a whole number of days and rendering a
+        two-hour window as "0d" (or, worse, rounding it to "1d") would
+        misdescribe every figure measured over it.
+        """
+        span = self.range_seconds
+        if not span:
+            return '—'
+        if span % 86400 == 0:
+            return f'{span // 86400}d'
+        if span % 3600 == 0:
+            return f'{span // 3600}h'
+        if span >= 3600:
+            return f'{span / 3600:.1f}h'
+        return f'{max(1, span // 60)}m'
+
+    @property
+    def range_description(self):
+        """The span plus where it sits — `2h ending 2026-10-06 19:20 UTC`.
+
+        A preset pull ends at the moment it was started, so the end time adds
+        little; a custom range is meaningless without it. One format serves
+        both rather than guessing which kind this row is.
+        """
+        if not self.range_end:
+            return self.range_label
+        ends = datetime.fromtimestamp(self.range_end, tz=timezone.utc)
+        return f'{self.range_label} ending {ends.strftime("%Y-%m-%d %H:%M")} UTC'
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -1121,6 +1169,8 @@ class LogPull(db.Model):
             'window_days': self.window_days,
             'range_start': self.range_start,
             'range_end': self.range_end,
+            'range_label': self.range_label,
+            'range_description': self.range_description,
             'status': self.status,
             'phase': self.phase,
             'percent': self.percent,
@@ -1140,4 +1190,236 @@ class LogPull(db.Model):
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'error_message': self.error_message,
+            'comparison_id': self.comparison_id,
+            'window_label': self.window_label,
+        }
+
+
+class TrafficComparison(db.Model):
+    """A before/after measurement of one configuration change.
+
+    Each window is an ordinary `LogPull` child rather than a bespoke
+    collection path, so every window inherits durable progress, SocketIO
+    mirroring, cancel, resume-from-checkpoint and the disk-abort guard with
+    no second implementation to keep in step.
+
+    **The `after` child row is not created when the comparison is armed.**
+    `before` and the control windows are already in the past and immutable at
+    that moment, but `after` is not — and `LogPull.STATUS_PENDING` counts as
+    active, so creating its row early would hold the portal's single pull
+    slot for however many hours the window takes to elapse and block every
+    other user. The plan lives here; the scheduler creates the child when
+    `after_due_at` passes.
+    """
+    __tablename__ = 'traffic_comparisons'
+
+    STATUS_PENDING = 'pending'
+    STATUS_COLLECTING = 'collecting'
+    #: Past windows are done; the `after` window has not elapsed yet.
+    STATUS_WAITING = 'waiting'
+    STATUS_ANALYZING = 'analyzing'
+    STATUS_COMPLETE = 'complete'
+    STATUS_ERROR = 'error'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_INTERRUPTED = 'interrupted'
+
+    TERMINAL_STATUSES = (STATUS_COMPLETE, STATUS_ERROR, STATUS_CANCELLED)
+    #: Statuses occupying the pull slot. `waiting` is deliberately absent —
+    #: a comparison waiting on wall-clock holds nothing.
+    BUSY_STATUSES = (STATUS_PENDING, STATUS_COLLECTING, STATUS_ANALYZING)
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('waas_accounts.id', ondelete='CASCADE'),
+                           nullable=False, index=True)
+    app_id = db.Column(db.String(255), nullable=False, index=True)
+    app_name = db.Column(db.String(255), nullable=False)
+
+    # --- plan ---
+    change_at = db.Column(db.Integer, nullable=False)        # epoch seconds
+    duration_seconds = db.Column(db.Integer, nullable=False, default=7200)
+    guard_seconds = db.Column(db.Integer, nullable=False, default=180)
+    control_days = db.Column(db.Integer, nullable=False, default=1)
+    focus_url = db.Column(db.String(500), nullable=True)
+    segments_data = db.Column(db.Text, nullable=True)        # JSON list
+    change_note = db.Column(db.String(500), nullable=True)
+
+    # --- lifecycle ---
+    status = db.Column(db.String(20), nullable=False, default=STATUS_PENDING, index=True)
+    session_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
+    cancel_requested = db.Column(db.Boolean, nullable=False, default=False)
+    current_label = db.Column(db.String(40), nullable=True)
+    after_due_at = db.Column(db.DateTime, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+    # --- progress ---
+    #: Exact: the sum of one count query per planned window, run at arming.
+    rows_expected = db.Column(db.Integer, nullable=False, default=0)
+    windows_total = db.Column(db.Integer, nullable=False, default=0)
+
+    # --- retention ---
+    pinned = db.Column(db.Boolean, nullable=False, default=False)
+
+    # --- results ---
+    result_data = db.Column(db.Text, nullable=True)
+    report_data = db.Column(db.Text, nullable=True)
+
+    user = db.relationship('User', backref=db.backref('traffic_comparisons', lazy='dynamic'))
+    account = db.relationship('WaasAccount',
+                              backref=db.backref('traffic_comparisons', lazy='dynamic'))
+    windows = db.relationship(
+        'LogPull', backref=db.backref('comparison'),
+        order_by='LogPull.id', lazy='select',
+    )
+
+    def __repr__(self):
+        return f'<TrafficComparison {self.id}: {self.app_name} [{self.status}]>'
+
+    # --- JSON columns -----------------------------------------------------
+
+    @property
+    def segments(self):
+        return json.loads(self.segments_data) if self.segments_data else []
+
+    @segments.setter
+    def segments(self, value):
+        self.segments_data = json.dumps(list(value)) if value else None
+
+    @property
+    def result(self):
+        return json.loads(self.result_data) if self.result_data else None
+
+    @result.setter
+    def result(self, value):
+        self.result_data = json.dumps(value) if value is not None else None
+
+    @property
+    def report(self):
+        return json.loads(self.report_data) if self.report_data else None
+
+    @report.setter
+    def report(self, value):
+        self.report_data = json.dumps(value) if value is not None else None
+
+    # --- progress ---------------------------------------------------------
+
+    @property
+    def is_busy(self):
+        return self.status in self.BUSY_STATUSES
+
+    @property
+    def rows_fetched(self):
+        return sum(pull.rows_fetched or 0 for pull in self.windows)
+
+    @property
+    def windows_done(self):
+        return sum(1 for pull in self.windows
+                   if pull.status == LogPull.STATUS_COMPLETE)
+
+    @property
+    def percent(self):
+        if self.status == self.STATUS_COMPLETE:
+            return 100
+        if not self.rows_expected:
+            return 0
+        return min(99, int(self.rows_fetched * 100 / self.rows_expected))
+
+    @property
+    def observed_rate(self):
+        """Rows per second across time actually spent collecting.
+
+        Measured from the children's own start/finish times rather than from
+        the parent's elapsed wall-clock, because a comparison can sit in
+        `waiting` for hours between windows. Counting that idle time as
+        throughput would make the ETA grow the longer the portal waits, which
+        is precisely backwards.
+        """
+        rows = 0
+        seconds = 0.0
+        now = datetime.utcnow()
+        for pull in self.windows:
+            if not pull.started_at:
+                continue
+            rows += pull.rows_fetched or 0
+            ended = pull.completed_at or now
+            seconds += max(0.0, (ended - pull.started_at).total_seconds())
+        if rows <= 0 or seconds <= 0:
+            return None
+        return rows / seconds
+
+    @property
+    def eta_seconds(self):
+        """Seconds of collection remaining, or None when it cannot be known.
+
+        `None` while waiting on wall-clock: the figure that matters then is
+        the countdown to `after_due_at`, and reporting a two-minute
+        collection estimate beside a two-hour wait would be worse than
+        reporting nothing.
+        """
+        if self.status == self.STATUS_WAITING:
+            return None
+        rate = self.observed_rate
+        if rate is None or not self.rows_expected:
+            return None
+        remaining = self.rows_expected - self.rows_fetched
+        if remaining <= 0:
+            return None
+        return int(remaining / rate)
+
+    @property
+    def waiting_seconds(self):
+        """Seconds until the `after` window can be collected, or None."""
+        if self.status != self.STATUS_WAITING or not self.after_due_at:
+            return None
+        return max(0, int((self.after_due_at - datetime.utcnow()).total_seconds()))
+
+    def window(self, label):
+        for pull in self.windows:
+            if pull.window_label == label:
+                return pull
+        return None
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'app_id': self.app_id,
+            'app_name': self.app_name,
+            'change_at': self.change_at,
+            'duration_seconds': self.duration_seconds,
+            'guard_seconds': self.guard_seconds,
+            'control_days': self.control_days,
+            'focus_url': self.focus_url,
+            'segments': self.segments,
+            'status': self.status,
+            'current_label': self.current_label,
+            'percent': self.percent,
+            'rows_expected': self.rows_expected,
+            'rows_fetched': self.rows_fetched,
+            'windows_total': self.windows_total,
+            'windows_done': self.windows_done,
+            'eta_seconds': self.eta_seconds,
+            'waiting_seconds': self.waiting_seconds,
+            'after_due_at': self.after_due_at.isoformat() if self.after_due_at else None,
+            'pinned': self.pinned,
+            'cancel_requested': self.cancel_requested,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'windows': [
+                {
+                    'label': pull.window_label,
+                    'pull_id': pull.id,
+                    'status': pull.status,
+                    'percent': pull.percent,
+                    'rows_fetched': pull.rows_fetched,
+                    'rows_expected': pull.rows_expected,
+                    'range_start': pull.range_start,
+                    'range_end': pull.range_end,
+                }
+                for pull in self.windows
+            ],
         }

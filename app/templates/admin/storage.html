@@ -91,7 +91,7 @@
                     <tr>
                         <td class="text-muted">{{ pull.id }}</td>
                         <td><code>{{ pull.app_name }}</code>
-                            <div class="text-muted small">{{ pull.mode }} · {{ pull.window_days }}d</div>
+                            <div class="text-muted small">{{ pull.mode }} · {{ pull.range_label }}</div>
                         </td>
                         <td class="small">{{ pull.user.display_name if pull.user else '—' }}</td>
                         <td><span class="badge bg-secondary">{{ pull.status }}</span></td>

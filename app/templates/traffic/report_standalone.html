@@ -75,8 +75,8 @@
   <h1>Traffic Analysis &mdash; <code>{{ doc.meta.app_name }}</code></h1>
   <div class="sub">
     {% if doc.meta.account_name %}{{ doc.meta.account_name }} &middot; {% endif %}
-    {{ doc.meta.period_start.strftime('%Y-%m-%d') }} &rarr; {{ doc.meta.period_end.strftime('%Y-%m-%d') }} UTC
-    &middot; {{ doc.meta.window_days }}-day window, {{ doc.meta.mode }} collection
+    {{ doc.meta.period_label }}
+    &middot; {{ doc.meta.range_label }} window, {{ doc.meta.mode }} collection
     &middot; generated {{ doc.meta.generated_on }}
   </div>
 </header>

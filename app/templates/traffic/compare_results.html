@@ -1,0 +1,486 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Comparison results') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Traffic Analysis'), url_for('traffic.index')),
+    (_('Comparisons'), url_for('traffic_compare.index')),
+    (comparison.app_name, None)
+]) }}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Chart roles, so light/dark swap in one place and the chart body is written
+   against roles rather than raw hex. Slots 1-3 carry the attributed segments;
+   everything else is deliberately neutral — "rest" is not an entity of
+   interest and a fourth hue would say it was. */
+.viz-root {
+  color-scheme: light;
+  --surface-1:      #fcfcfb;
+  --text-secondary: #52514e;
+  --grid:           #e6e5e1;
+  --series-1:       #2a78d6;
+  --series-2:       #eb6834;
+  --series-3:       #1baf7a;
+  --series-rest:    #9a9892;
+  --marker:         #52514e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --text-secondary: #c3c2b7;
+    --grid:           #343431;
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --series-rest:    #86847c;
+    --marker:         #c3c2b7;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-1:      #1a1a19;
+  --text-secondary: #c3c2b7;
+  --grid:           #343431;
+  --series-1:       #3987e5;
+  --series-2:       #d95926;
+  --series-3:       #199e70;
+  --series-rest:    #86847c;
+  --marker:         #c3c2b7;
+}
+/* Sized to include the x-axis band, so the card never grows a nested scroll. */
+.viz-plot { position: relative; height: 340px; }
+.verdict-good    { border-left: 4px solid var(--bs-success); }
+.verdict-warning { border-left: 4px solid var(--bs-warning); }
+.verdict-neutral { border-left: 4px solid var(--bs-secondary); }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set windows = result.get('windows') or {} %}
+{% set before = windows.get('before') or {} %}
+{% set after = windows.get('after') or {} %}
+
+<div class="d-flex justify-content-between align-items-start mt-4 mb-3">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-arrow-left-right"></i> {{ comparison.app_name }}</h2>
+        <p class="text-muted mb-0">
+            {{ _('Change at %(when)s UTC', when=comparison.change_at | epoch_s) }}
+            · {{ _('%(n)s-hour windows', n='{:g}'.format(comparison.duration_seconds / 3600)) }}
+            · {{ _('%(n)s control day(s)', n=comparison.control_days) }}
+            {% if comparison.change_note %}<br><em>{{ comparison.change_note }}</em>{% endif %}
+        </p>
+    </div>
+    <form method="post" action="{{ url_for('traffic_compare.pin', comparison_id=comparison.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="pinned" value="{{ 'no' if comparison.pinned else 'yes' }}">
+        <button class="btn btn-sm {{ 'btn-secondary' if comparison.pinned else 'btn-outline-secondary' }}">
+            <i class="bi bi-pin-angle{{ '-fill' if comparison.pinned }}"></i>
+            {{ _('Pinned') if comparison.pinned else _('Pin') }}
+        </button>
+    </form>
+</div>
+
+{# --- 1. Verdict ------------------------------------------------------- #}
+{% if verdict %}
+<div class="card mb-4 verdict-{{ verdict.tone }}">
+    <div class="card-body">
+        <h5 class="mb-2">
+            {{ _('%(segment)s bandwidth %(direction)s %(pct)s',
+                 segment=verdict.segment,
+                 direction=_('fell') if verdict.fell else _('rose'),
+                 pct=(verdict.pct | abs) | plain_pct) }}
+            <span class="text-muted fs-6">
+                {{ before.get('segments', {}).get(verdict.segment, {}).get('bytes_per_hour') | si_bytes }}/h
+                →
+                {{ after.get('segments', {}).get(verdict.segment, {}).get('bytes_per_hour') | si_bytes }}/h
+            </span>
+        </h5>
+        {% if verdict.attributable_abs is not none %}
+        <p class="mb-1">
+            {{ _('Attributable to the change: %(abs)s/h (%(pct)s versus what the
+                 control days predicted).',
+                 abs=verdict.attributable_abs | si_bytes,
+                 pct=verdict.attributable_pct | signed_pct) }}
+        </p>
+        {% endif %}
+        <p class="text-muted mb-0 small">{{ verdict.confidence }}</p>
+    </div>
+</div>
+{% endif %}
+
+{# --- 2. Timeline — the hero ------------------------------------------- #}
+{% if tl.get('bins') %}
+<div class="card mb-4 viz-root">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            {{ _('Bandwidth through the change') }}
+            {% if tl.focus_url %}<span class="text-muted fs-6">— {{ _('focus URL only') }}</span>{% endif %}
+        </h5>
+        <button class="btn btn-sm btn-outline-secondary" type="button"
+                data-bs-toggle="collapse" data-bs-target="#timelineTable">
+            <i class="bi bi-table"></i> {{ _('Data') }}
+        </button>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small">
+            {{ _('Two aggregated windows can show that a number moved. Only this can
+                 show it moved when the change was made — and that needs no
+                 control day.') }}
+        </p>
+        <div class="viz-plot"><canvas id="timelineChart"></canvas></div>
+
+        <div class="collapse mt-3" id="timelineTable">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>{{ _('Bucket (UTC)') }}</th>
+                            {% for name in tl.highlight %}<th class="text-end">{{ name }}</th>{% endfor %}
+                            <th class="text-end">{{ _('Everything else') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-monospace small">
+                        {% for b in tl.bins %}
+                        <tr {% if b.start >= tl.change_at %}class="table-active"{% endif %}>
+                            <td>{{ b.start | epoch_s('%m-%d %H:%M') }}</td>
+                            {% for name in tl.highlight %}
+                            {% set g = b.groups.get(name) or {} %}
+                            <td class="text-end">
+                                {{ (g.get('focus_bytes') if tl.focus_url else g.get('bytes')) | si_bytes }}
+                            </td>
+                            {% endfor %}
+                            {% set r = b.groups.get('rest') or {} %}
+                            <td class="text-end">
+                                {{ (r.get('focus_bytes') if tl.focus_url else r.get('bytes')) | si_bytes }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# --- 3. Scorecard ----------------------------------------------------- #}
+{% set cmp = result.get('comparison') or {} %}
+{% if cmp.get('segments') %}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">{{ _('By segment — bandwidth first') }}</h5></div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Segment') }}</th>
+                        <th class="text-end">{{ _('Bytes/h before') }}</th>
+                        <th class="text-end">{{ _('Bytes/h after') }}</th>
+                        <th class="text-end">{{ _('Change') }}</th>
+                        <th class="text-end">{{ _('Requests/h') }}</th>
+                        <th class="text-end">{{ _('Avg/request') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in cmp.segments[:15] %}
+                    {% set d = row.delta %}
+                    <tr {% if row.segment in result.segments %}class="fw-semibold"{% endif %}>
+                        <td>{{ row.segment }}</td>
+                        <td class="text-end font-monospace">{{ d.bytes_per_hour.before | si_bytes }}</td>
+                        <td class="text-end font-monospace">{{ d.bytes_per_hour.after | si_bytes }}</td>
+                        <td class="text-end font-monospace
+                            {% if d.bytes_per_hour.pct is not none %}
+                            {{ 'text-success' if d.bytes_per_hour.pct < 0 else 'text-danger' }}{% endif %}">
+                            {{ d.bytes_per_hour.pct | signed_pct }}
+                        </td>
+                        <td class="text-end font-monospace">
+                            {{ '{:,.0f}'.format(d.requests_per_hour.before) if d.requests_per_hour.before is not none else '—' }}
+                            → {{ '{:,.0f}'.format(d.requests_per_hour.after) if d.requests_per_hour.after is not none else '—' }}
+                        </td>
+                        <td class="text-end font-monospace">{{ d.avg_bytes.after | si_bytes(1) }}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="table-secondary fw-semibold">
+                        <td>{{ _('All traffic') }}</td>
+                        <td class="text-end font-monospace">{{ cmp.totals.bytes_per_hour.before | si_bytes }}</td>
+                        <td class="text-end font-monospace">{{ cmp.totals.bytes_per_hour.after | si_bytes }}</td>
+                        <td class="text-end font-monospace">{{ cmp.totals.bytes_per_hour.pct | signed_pct }}</td>
+                        <td class="text-end font-monospace">{{ cmp.totals.requests_per_hour.pct | signed_pct }}</td>
+                        <td></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# --- 4. Focus URL ----------------------------------------------------- #}
+{% if comparison.focus_url and before.get('focus') %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">{{ _('The URL this change targeted') }}</h5>
+        <code class="small">{{ comparison.focus_url }}</code>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Segment') }}</th>
+                        <th></th>
+                        <th class="text-end">{{ _('Requests/h') }}</th>
+                        <th class="text-end">{{ _('Bytes/h') }}</th>
+                        <th class="text-end">{{ _('Avg response') }}</th>
+                        <th>{{ _('Status') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set fb = (before.focus or {}).get('by_segment') or {} %}
+                    {% set fa = (after.get('focus') or {}).get('by_segment') or {} %}
+                    {% for name in (fb.keys() | list + fa.keys() | list) | unique | sort %}
+                    {% for phase, rows in [('before', fb), ('after', fa)] %}
+                    {% set r = rows.get(name) or {} %}
+                    <tr>
+                        <td>{% if phase == 'before' %}{{ name }}{% endif %}</td>
+                        <td class="text-muted small">{{ phase }}</td>
+                        <td class="text-end font-monospace">{{ '{:,.0f}'.format(r.get('requests_per_hour') or 0) }}</td>
+                        <td class="text-end font-monospace">{{ r.get('bytes_per_hour') | si_bytes }}</td>
+                        <td class="text-end font-monospace">{{ r.get('avg_bytes') | si_bytes(1) }}</td>
+                        <td class="small text-muted">
+                            {% for code, n in (r.get('status') or {}).items() %}{{ code }} {{ '{:,}'.format(n) }} {% endfor %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# --- 5. Safety -------------------------------------------------------- #}
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">{{ _('Did anything else move?') }}</h5></div>
+    <div class="card-body">
+        {% set human = 'Human / undeclared' %}
+        {% if comparison.focus_url %}
+        {% set hb = ((before.focus or {}).get('by_segment') or {}).get(human) %}
+        {% set ha = ((after.get('focus') or {}).get('by_segment') or {}).get(human) %}
+        {% if hb or ha %}
+        <p class="mb-2">
+            {{ _('Undeclared and browser clients requesting the focus URL:') }}
+            <strong>{{ '{:,}'.format((hb or {}).get('requests') or 0) }}</strong> {{ _('before') }},
+            <strong>{{ '{:,}'.format((ha or {}).get('requests') or 0) }}</strong> {{ _('after') }}.
+        </p>
+        <p class="text-muted small">
+            {{ _('If this is non-zero and now answering 4xx, real clients are being
+                 refused. If it is non-zero and still answering 2xx, the change is
+                 not reaching them.') }}
+        </p>
+        {% else %}
+        <p class="mb-2">{{ _('No undeclared or browser client requested the focus URL in either window.') }}</p>
+        {% endif %}
+        {% endif %}
+
+        <div class="row g-3 mt-1">
+            {% for phase, w in [(_('before'), before), (_('after'), after)] %}
+            <div class="col-md-6">
+                <div class="text-muted small mb-1">{{ _('Status mix, %(phase)s', phase=phase) }}</div>
+                <div class="font-monospace small">
+                    {% for code, n in (w.get('status') or {}).items() %}
+                    {{ code }} {{ (n / (w.get('rows') or 1)) | plain_pct }}&nbsp;&nbsp;
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# --- 6. Verification -------------------------------------------------- #}
+{% set verified_rows = [] %}
+{% for label, w in [('before', before), ('after', after)] %}
+{% for name, seg in (w.get('segments') or {}).items() %}
+{% if (seg.get('verified') or {}).get('yes') or (seg.get('verified') or {}).get('no') %}
+{% set _ = verified_rows.append((label, name, seg.verified)) %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% if verified_rows %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">{{ _('Crawler verification') }}</h5>
+        <span class="text-muted small">{{ _('declared User-Agent against the operator\'s published address ranges') }}</span>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>{{ _('Window') }}</th><th>{{ _('Segment') }}</th>
+                    <th class="text-end">{{ _('From a published range') }}</th>
+                    <th class="text-end">{{ _('Not') }}</th>
+                    <th class="text-end">{{ _('No list published') }}</th>
+                </tr>
+            </thead>
+            <tbody class="font-monospace small">
+                {% for label, name, v in verified_rows %}
+                <tr>
+                    <td>{{ label }}</td><td>{{ name }}</td>
+                    <td class="text-end">{{ '{:,}'.format(v.get('yes') or 0) }}</td>
+                    <td class="text-end {{ 'text-danger' if v.get('no') }}">{{ '{:,}'.format(v.get('no') or 0) }}</td>
+                    <td class="text-end text-muted">{{ '{:,}'.format(v.get('unknown') or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer text-muted small">
+        {{ _('A crawler whose operator publishes no address list is unverifiable, not an impostor.') }}
+    </div>
+</div>
+{% endif %}
+
+{# --- 7. Limits -------------------------------------------------------- #}
+<div class="card mb-5">
+    <div class="card-header"><h5 class="mb-0">{{ _('How to read this') }}</h5></div>
+    <div class="card-body">
+        <ul class="mb-0 text-muted small">
+            {% for item in limits %}<li class="mb-1">{{ item }}</li>{% endfor %}
+        </ul>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if tl.get('bins') %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var data = {{ tl | tojson }};
+    var canvas = document.getElementById('timelineChart');
+    if (!canvas || !data.bins.length) { return; }
+
+    var css = getComputedStyle(document.querySelector('.viz-root'));
+    function role(name) { return css.getPropertyValue(name).trim(); }
+    var slots = [role('--series-1'), role('--series-2'), role('--series-3')];
+    var grid = role('--grid');
+    var ink = role('--text-secondary');
+    var marker = role('--marker');
+    var useFocus = !!data.focus_url;
+
+    // Buckets hold bytes *per bucket*. Everything else on this page is a
+    // per-hour rate, so scale here rather than labelling the axis with one
+    // unit and plotting another — and divide by the seconds the bucket
+    // genuinely covers, since the first and last of each window are partial.
+    function value(bin, group) {
+        var g = (bin.groups || {})[group] || {};
+        var seconds = bin.seconds || data.bucket || 600;
+        return ((useFocus ? g.focus_bytes : g.bytes) || 0) * (3600 / seconds);
+    }
+
+    // Buckets are discrete intervals at a constant rate, not samples of a
+    // continuous signal, so the line steps rather than interpolating between
+    // bucket midpoints — which would draw a slope the data does not claim.
+    var series = data.highlight.map(function (name, i) {
+        return {
+            label: name,
+            data: data.bins.map(function (b) { return value(b, name); }),
+            borderColor: slots[i % slots.length],
+            backgroundColor: slots[i % slots.length],
+            borderWidth: 2, stepped: 'before',
+            pointRadius: 0, pointHitRadius: 24, tension: 0
+        };
+    });
+    series.push({
+        label: {{ _('Everything else') | tojson }},
+        data: data.bins.map(function (b) { return value(b, 'rest'); }),
+        borderColor: role('--series-rest'),
+        backgroundColor: role('--series-rest'),
+        borderWidth: 2, stepped: 'before', borderDash: [],
+        pointRadius: 0, pointHitRadius: 24, tension: 0
+    });
+
+    var labels = data.bins.map(function (b) {
+        return new Date(b.start * 1000).toISOString().slice(5, 16).replace('T', ' ');
+    });
+
+    function siBytes(n) {
+        var units = [[1e12, 'TB'], [1e9, 'GB'], [1e6, 'MB'], [1e3, 'kB']];
+        for (var i = 0; i < units.length; i++) {
+            if (Math.abs(n) >= units[i][0]) {
+                return (n / units[i][0]).toFixed(2) + ' ' + units[i][1];
+            }
+        }
+        return Math.round(n) + ' B';
+    }
+
+    // The change marker is an event rule, not a gridline: solid, one shade
+    // off the ink, labelled, and drawn under the data.
+    var changeMarker = {
+        id: 'changeMarker',
+        beforeDatasetsDraw: function (chart) {
+            var index = -1;
+            for (var i = 0; i < data.bins.length; i++) {
+                if (data.bins[i].start >= data.change_at) { index = i; break; }
+            }
+            if (index < 0) { return; }
+            var x = chart.scales.x.getPixelForValue(index);
+            var area = chart.chartArea;
+            var ctx = chart.ctx;
+            ctx.save();
+            ctx.strokeStyle = marker;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, area.top);
+            ctx.lineTo(x, area.bottom);
+            ctx.stroke();
+            ctx.fillStyle = marker;
+            ctx.font = '11px system-ui, sans-serif';
+            ctx.textAlign = x > (area.left + area.right) / 2 ? 'right' : 'left';
+            ctx.fillText({{ _('change') | tojson }},
+                         x + (ctx.textAlign === 'right' ? -6 : 6), area.top + 12);
+            ctx.restore();
+        }
+    };
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {labels: labels, datasets: series},
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: {mode: 'index', intersect: false},
+            plugins: {
+                legend: {position: 'bottom',
+                         labels: {color: ink, usePointStyle: true, boxWidth: 8}},
+                tooltip: {
+                    callbacks: {
+                        label: function (c) {
+                            return c.dataset.label + ': ' + siBytes(c.parsed.y) + '/h';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {grid: {color: grid, display: false},
+                    ticks: {color: ink, maxRotation: 0, autoSkipPadding: 20}},
+                y: {beginAtZero: true,
+                    grid: {color: grid},
+                    border: {display: false},
+                    ticks: {color: ink, callback: function (v) { return siBytes(v); }},
+                    title: {display: true, color: ink,
+                            text: {{ _('bytes per hour') | tojson }}}}
+            }
+        },
+        plugins: [changeMarker]
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

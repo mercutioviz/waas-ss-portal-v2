@@ -47,6 +47,14 @@ from app.traffic_insights import _int, _rate, _text
 #: should not claim more than the User-Agent said.
 SEGMENT_HUMAN = 'Human / undeclared'
 
+#: Sentinel for "argument not supplied", where None is itself meaningful.
+_UNSET = object()
+
+#: Margin against log-ingestion delay. A window whose end is nearer than this
+#: to now may still be filling, and a half-filled window reported as complete
+#: is the most flattering possible artefact in a bandwidth comparison.
+DEFAULT_INGEST_LAG = 120
+
 #: Per-segment URL tables are kept for the bandwidth story, so they are
 #: trimmed by bytes rather than by hits. A URL fetched constantly but cheaply
 #: is a request-count finding, not a bandwidth one, and the request totals
@@ -91,7 +99,7 @@ def parse_duration(text):
 
 
 def plan_comparison(change_at, duration, *, guard=0, control_days=0,
-                    now=None, lag=120):
+                    now=None, lag=DEFAULT_INGEST_LAG, allow_future=False):
     """Windows for a before/after run around a change at `change_at`.
 
     `before` ends exactly at the change; `after` starts `guard` seconds later.
@@ -108,11 +116,18 @@ def plan_comparison(change_at, duration, *, guard=0, control_days=0,
     nearer than this to `now` may still be filling, and a half-filled "after"
     window is the most flattering possible artefact in a bandwidth
     comparison.
+
+    `allow_future=True` plans an "after" window that has not elapsed yet
+    instead of refusing it. That is the arming case: the whole point of
+    arming a comparison at the moment of a change is that `before` and the
+    control days are already collectable while `after` is not. The caller
+    takes `after_collectable_at` from the result and defers collection until
+    then — the check is not skipped, only moved.
     """
-    change_at = int(change_at)
+    change_at = to_epoch(change_at)
     duration = int(duration)
     guard = int(guard)
-    now = int(now if now is not None else datetime.now(timezone.utc).timestamp())
+    now = to_epoch(now)
 
     if duration <= 0:
         raise ValueError('duration must be positive')
@@ -120,7 +135,7 @@ def plan_comparison(change_at, duration, *, guard=0, control_days=0,
         raise ValueError('guard cannot be negative')
 
     after = Window(change_at + guard, change_at + guard + duration)
-    if after.end > now - lag:
+    if after.end > now - lag and not allow_future:
         room = max(0, (now - lag) - (change_at + guard))
         raise ValueError(
             f'the "after" window ends at {_iso(after.end)}, which is not yet '
@@ -144,10 +159,28 @@ def plan_comparison(change_at, duration, *, guard=0, control_days=0,
         'change_at': change_at,
         'duration': duration,
         'guard': guard,
+        'lag': lag,
         'before': before,
         'after': after,
         'controls': controls,
+        # When the "after" window stops filling and becomes safe to collect.
+        # Already in the past for a plan made after the fact.
+        'after_collectable_at': after.end + lag,
     }
+
+
+def past_labels(plan, now=None):
+    """Labels whose window has already settled, in collection order.
+
+    At arming time this is everything except `after`; for a plan made after
+    the fact it is every label. Splitting the two is what lets a comparison
+    collect its immutable half immediately and defer only the part that is
+    genuinely not there yet.
+    """
+    now = to_epoch(now)
+    lag = plan.get('lag', DEFAULT_INGEST_LAG)
+    return [(label, window) for label, window in plan_labels(plan)
+            if window.end <= now - lag]
 
 
 def plan_labels(plan):
@@ -416,10 +449,17 @@ class WindowAggregator:
         }
 
 
-def aggregate_window(store, label, window, **kwargs):
-    """Stream one collected window off disk and aggregate it."""
+def aggregate_window(store, label, window, *, dates=_UNSET, **kwargs):
+    """Stream one collected window off disk and aggregate it.
+
+    `dates` selects which files in the store to read. It defaults to the
+    window's own label, which is how an ad-hoc run keys its files — but a
+    window collected by `PullRunner` lives in a store of its own, keyed by
+    calendar date, and those callers pass `dates=None` to read all of it.
+    """
     aggregator = WindowAggregator(label, window, **kwargs)
-    for row in store.iter_rows(dates={label}):
+    selected = {label} if dates is _UNSET else dates
+    for row in store.iter_rows(dates=selected):
         aggregator.feed(row)
     return aggregator.result()
 
@@ -427,8 +467,28 @@ def aggregate_window(store, label, window, **kwargs):
 # --- timeline --------------------------------------------------------------
 
 
+def bucket_seconds(start, bucket, bounds):
+    """Seconds of `[start, start+bucket)` actually covered by `bounds`.
+
+    A window rarely starts on a bucket boundary, so its first and last
+    buckets are partial. Treating a 7-minute bucket as a 10-minute one
+    understates its rate by 30% and draws a dip at each end of the chart that
+    the traffic never had. Callers that supply `bounds` get the real
+    denominator; callers that do not get the nominal one.
+    """
+    if not bounds:
+        return bucket
+    end = start + bucket
+    covered = 0
+    for lo, hi in bounds:
+        overlap = min(end, hi) - max(start, lo)
+        if overlap > 0:
+            covered += overlap
+    return covered
+
+
 def timeline(store, labels, *, bucket=600, segment=None, focus_url=None,
-             highlight=()):
+             highlight=(), dates=_UNSET, bounds=None):
     """Per-bucket counts across one or more collected windows.
 
     Two aggregated windows can tell you that a number moved. Only a timeline
@@ -449,7 +509,8 @@ def timeline(store, labels, *, bucket=600, segment=None, focus_url=None,
     bins = {}
 
     for label in labels:
-        for row in store.iter_rows(dates={label}):
+        selected = {label} if dates is _UNSET else dates
+        for row in store.iter_rows(dates=selected):
             ms = _epoch_ms(row.get('EpochTime'))
             if ms is None:
                 continue
@@ -460,6 +521,9 @@ def timeline(store, labels, *, bucket=600, segment=None, focus_url=None,
                     'start': start, 'requests': 0, 'bytes': 0,
                     'focus_requests': 0, 'focus_bytes': 0,
                     'groups': {}, 'focus_status': {},
+                    # What a rate for this bucket must be divided by. Partial
+                    # at the edges of the collected window.
+                    'seconds': bucket_seconds(start, bucket, bounds),
                 }
 
             sent = _int(row.get('BytesSent')) or 0
@@ -650,6 +714,25 @@ def attribute_segment(segment, metric, windows):
 
 
 # --- small helpers ---------------------------------------------------------
+
+
+def to_epoch(value, default=None):
+    """Epoch seconds from `None`, a number, or a datetime.
+
+    Window boundaries are epoch seconds throughout this package, but callers
+    reach it from the ORM and from Flask routes where datetimes are the
+    natural currency. Coercing at the boundary is cheaper than a `TypeError`
+    raised several frames into the planner — the two units are impossible to
+    tell apart by inspection, which is what makes the mix-up easy to write.
+    """
+    if value is None:
+        return int(default if default is not None
+                   else datetime.now(timezone.utc).timestamp())
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return int(value.timestamp())
+    return int(value)
 
 
 def _per_hour(count, hours):

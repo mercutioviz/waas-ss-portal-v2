@@ -44,6 +44,7 @@ from app.background_tasks import (
     run_robots_proposal,
 )
 from app.logpull import corpus_bytes, preflight, report as report_builder
+from app.logpull.compare import DEFAULT_INGEST_LAG
 from app.logpull.preflight import MAX_TOTAL_BYTES, format_duration
 from app.logpull.source import LogSource
 from app.logpull.store import PullStore
@@ -67,6 +68,20 @@ PULLS_PER_PAGE = 20
 # for confidence, not detection.
 WINDOW_CHOICES = [(7, _('7 days (recommended)')), (30, _('30 days'))]
 ALLOWED_WINDOW_DAYS = {7, 30}
+DEFAULT_WINDOW_DAYS = 7
+
+#: Sentinel `window_days` value meaning "use the explicit range fields".
+CUSTOM_WINDOW = 'custom'
+
+#: Ceiling on a custom range, matching the longest preset. Beyond this a full
+#: pull is a multi-day commitment that the pre-flight already warns about, and
+#: the analysis caps start trimming long tails.
+MAX_CUSTOM_SPAN_DAYS = 30
+
+#: Margin against log-ingestion delay. Shared with the comparison planner
+#: (`app.logpull.compare.plan_comparison`) so a window judged collectable by
+#: one is collectable by the other.
+INGEST_LAG_SECONDS = DEFAULT_INGEST_LAG
 
 STATUS_BADGES = {
     LogPull.STATUS_PENDING: 'bg-secondary',
@@ -104,6 +119,80 @@ def _range_for(window_days, now=None):
     """
     end = int((now or datetime.now(timezone.utc)).timestamp())
     return end - window_days * 86400, end
+
+
+class RangeError(ValueError):
+    """A requested custom range cannot be collected as asked."""
+
+
+def _parse_instant(text):
+    """Epoch seconds from the form's `datetime-local` value.
+
+    Browsers submit `datetime-local` without a zone. The portal reports in
+    UTC everywhere else, so a naive value is read as UTC rather than as the
+    server's local time — the alternative silently shifts every custom range
+    by the host's offset.
+    """
+    raw = (text or '').strip().replace('Z', '+00:00')
+    if not raw:
+        raise RangeError(_('Enter both a start and an end time.'))
+    try:
+        moment = datetime.fromisoformat(raw)
+    except ValueError:
+        raise RangeError(_('%(value)s is not a valid date and time.',
+                           value=raw)) from None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return int(moment.timestamp())
+
+
+def _custom_range(start_text, end_text, now=None):
+    """Validate an explicit `[start, end)` from the form.
+
+    Three ways a custom range goes wrong, each with a different fix, so each
+    gets its own message rather than one generic refusal.
+    """
+    now = int((now or datetime.now(timezone.utc)).timestamp())
+    start, end = _parse_instant(start_text), _parse_instant(end_text)
+
+    if end <= start:
+        raise RangeError(_('The end time must be after the start time.'))
+    if end - start > MAX_CUSTOM_SPAN_DAYS * 86400:
+        raise RangeError(
+            _('That range covers %(days)s days; the maximum is %(max)s.',
+              days=round((end - start) / 86400, 1), max=MAX_CUSTOM_SPAN_DAYS))
+    if end > now - INGEST_LAG_SECONDS:
+        raise RangeError(
+            _('The end time is too recent. Logs take a moment to arrive, so '
+              'a window ending within %(lag)ss of now may still be filling '
+              'and would be reported as complete when it is not.',
+              lag=INGEST_LAG_SECONDS))
+    return start, end
+
+
+def _resolve_range(form, now=None):
+    """`(start, end, window_days)` for either a preset or a custom range.
+
+    `window_days` is still written to the row so the column stays non-null
+    and existing rows keep working; it is no longer what the UI reads back —
+    `LogPull.range_label` derives the display from the range itself.
+    """
+    # The JSON preflight sends an int; the HTML form sends a string. Both
+    # reach here, so normalise rather than assuming either.
+    raw_window = str(form.get('window_days') or '').strip()
+    if raw_window == CUSTOM_WINDOW:
+        start, end = _custom_range(form.get('range_start'),
+                                   form.get('range_end'), now=now)
+        return start, end, max(1, round((end - start) / 86400))
+
+    try:
+        window_days = int(raw_window)
+    except (TypeError, ValueError):
+        window_days = DEFAULT_WINDOW_DAYS
+    if window_days not in ALLOWED_WINDOW_DAYS:
+        window_days = DEFAULT_WINDOW_DAYS
+    start, end = _range_for(window_days, now=now)
+    return start, end, window_days
 
 
 @bp.route('/')
@@ -153,6 +242,8 @@ def new_pull():
         account=account,
         applications=applications,
         window_choices=WINDOW_CHOICES,
+        max_custom_span_days=MAX_CUSTOM_SPAN_DAYS,
+        ingest_lag_seconds=INGEST_LAG_SECONDS,
         active=active_pull(),
         error=error,
     )
@@ -167,25 +258,24 @@ def preflight_estimate():
     choice: one count query costs a fraction of a second and tells the user
     whether "full" means four minutes or a day and a half.
     """
-    account_id = request.json.get('account_id') if request.is_json else None
-    app_id = request.json.get('app_id') if request.is_json else None
-    window_days = (request.json.get('window_days') if request.is_json else None) or 7
-
-    try:
-        window_days = int(window_days)
-    except (TypeError, ValueError):
-        window_days = 7
-    if window_days not in ALLOWED_WINDOW_DAYS:
-        window_days = 7
+    payload = request.json if request.is_json else {}
+    account_id = payload.get('account_id')
+    app_id = payload.get('app_id')
 
     if not account_id or not app_id:
         return jsonify({'error': 'account_id and app_id are required'}), 400
+
+    try:
+        start, end, window_days = _resolve_range(payload)
+    except RangeError as e:
+        # 200 rather than 4xx: the estimate panel renders this as guidance
+        # while the user is still typing a range, not as a failed request.
+        return jsonify({'error': str(e)})
 
     client, account, _perm = get_client_for_account(account_id)
     if not client:
         return jsonify({'error': 'Account not found or access denied'}), 403
 
-    start, end = _range_for(window_days)
     source = LogSource(client, app_id)
 
     try:
@@ -199,6 +289,8 @@ def preflight_estimate():
     for mode, option in report['options'].items():
         option['duration_label'] = format_duration(option['seconds'])
     report['window_days'] = window_days
+    report['span_seconds'] = end - start
+    report['span_label'] = format_duration(end - start)
     report['busy'] = active_pull() is not None
     return jsonify(report)
 
@@ -210,17 +302,20 @@ def create_pull():
     app_id = (request.form.get('app_id') or '').strip()
     app_name = (request.form.get('app_name') or app_id).strip()
     mode = request.form.get('mode') or MODE_SAMPLE
-    window_days = request.form.get('window_days', type=int) or 7
     confirmed = request.form.get('confirm_full') == 'yes'
 
     if mode not in (MODE_SAMPLE, MODE_FULL):
         mode = MODE_SAMPLE
-    if window_days not in ALLOWED_WINDOW_DAYS:
-        window_days = 7
 
     if not account_id or not app_id:
         flash(_('Select an account and an application.'), 'danger')
         return redirect(url_for('traffic.new_pull'))
+
+    try:
+        start, end, window_days = _resolve_range(request.form)
+    except RangeError as e:
+        flash(str(e), 'danger')
+        return redirect(url_for('traffic.new_pull', account_id=account_id))
 
     existing = active_pull()
     if existing is not None:
@@ -233,7 +328,6 @@ def create_pull():
         flash(_('Account not found or access denied.'), 'danger')
         return redirect(url_for('traffic.new_pull'))
 
-    start, end = _range_for(window_days)
     source = LogSource(client, app_id)
 
     try:
@@ -288,7 +382,7 @@ def create_pull():
     AuditLog.log(
         user_id=current_user.id,
         action='logpull_start',
-        details=f'{mode} pull of {app_name} over {window_days}d '
+        details=f'{mode} pull of {app_name} over {pull.range_description} '
                 f'(~{option["rows"]:,} rows, est. {format_duration(option["seconds"])})',
     )
 
@@ -559,6 +653,16 @@ def _report_document(pull):
     """
     summary = pull.result or {}
     stored = pull.report or {}
+    start = datetime.fromtimestamp(pull.range_start, timezone.utc)
+    end = datetime.fromtimestamp(pull.range_end, timezone.utc)
+    # Dates alone read as "2026-10-06 → 2026-10-06" on a sub-day window, which
+    # tells the reader nothing about what was actually measured.
+    if pull.range_seconds < 86400:
+        period_label = (f'{start.strftime("%Y-%m-%d %H:%M")} → '
+                        f'{end.strftime("%H:%M")} UTC')
+    else:
+        period_label = (f'{start.strftime("%Y-%m-%d")} → '
+                        f'{end.strftime("%Y-%m-%d")} UTC')
     meta = {
         'pull_id': pull.id,
         'app_name': pull.app_name,
@@ -566,8 +670,11 @@ def _report_document(pull):
         'account_name': pull.account.account_name if pull.account else None,
         'mode': pull.mode,
         'window_days': pull.window_days,
-        'period_start': datetime.fromtimestamp(pull.range_start, timezone.utc),
-        'period_end': datetime.fromtimestamp(pull.range_end, timezone.utc),
+        'range_label': pull.range_label,
+        'range_description': pull.range_description,
+        'period_label': period_label,
+        'period_start': start,
+        'period_end': end,
         'raw_deleted': pull.raw_deleted,
         'generated_on': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
     }

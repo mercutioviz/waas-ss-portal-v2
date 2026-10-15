@@ -5,6 +5,8 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
+from sqlalchemy import and_, or_
+
 from app import db, socketio
 from app.waas_client import WaasClient, WaasApiError
 
@@ -400,6 +402,13 @@ def run_traffic_hint_cleanup(app) -> int:
 LOG_PULL_RAW_RETENTION_DAYS = 3
 LOG_PULL_RESULT_RETENTION_DAYS = 30
 
+#: Comparison windows keep their rows longer than an ad-hoc pull's. A
+#: comparison is a baseline you come back to — re-analysing one with a
+#: different focus URL or segment needs the rows, and three days is shorter
+#: than the gap between making a change and wondering what it did. They are
+#: also small: eight two-hour windows of a busy app came to 27 MB.
+COMPARISON_RAW_RETENTION_DAYS = 14
+
 
 def run_log_pull(app, pull_id: int, session_id: str) -> None:
     """Greenlet body: collect access logs for a LogPull, persist, emit progress.
@@ -664,6 +673,266 @@ def _finish_pull(pull, status, message, emit):
         db.session.rollback()
 
 
+# --- Traffic comparisons ---------------------------------------------------
+
+
+def run_traffic_comparison(app, comparison_id: int, session_id: str,
+                           wait_for_join: bool = True) -> None:
+    """Greenlet body: collect every settled window, then wait or finish.
+
+    Windows run one at a time through the ordinary `PullRunner`, so each gets
+    the same checkpointing, cancel polling and disk guard an individual pull
+    gets. What this layer adds is the sequence, the parent-level progress the
+    watch page reads, and the decision at the end: if the `after` window has
+    not elapsed yet the comparison parks in `waiting` and the scheduler picks
+    it up later, rather than blocking a greenlet for hours.
+    """
+    from app.logpull.windows import Cancelled
+    from app.models import LogPull, TrafficComparison
+    from app.socketio_events import clear_join_signal, pending_join
+    from app.traffic_comparison import ensure_after_window, pending_windows
+
+    with app.app_context():
+        if wait_for_join:
+            try:
+                pending_join(session_id).wait(timeout=10.0)
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+        comparison = db.session.get(TrafficComparison, comparison_id)
+        if comparison is None:
+            logger.error(f'run_traffic_comparison: no row with id={comparison_id}')
+            clear_join_signal(session_id)
+            return
+
+        def emit(payload=None):
+            socketio.emit('comparison_progress',
+                          payload or comparison.to_dict(), room=session_id)
+
+        try:
+            client = WaasClient.from_account(comparison.account)
+
+            if comparison.started_at is None:
+                comparison.started_at = datetime.utcnow()
+            comparison.status = TrafficComparison.STATUS_COLLECTING
+            comparison.error_message = None
+            db.session.commit()
+            emit()
+
+            # Re-checked each pass rather than iterated once: the `after`
+            # window can come due *while* earlier windows are collecting,
+            # which saves waiting a whole scheduler cycle for it.
+            while True:
+                ensure_after_window(comparison)
+                db.session.refresh(comparison)
+                if comparison.cancel_requested:
+                    raise Cancelled()
+
+                queue = pending_windows(comparison)
+                if not queue:
+                    break
+
+                for pull in queue:
+                    db.session.refresh(comparison)
+                    if comparison.cancel_requested:
+                        raise Cancelled()
+                    comparison.current_label = pull.window_label
+                    db.session.commit()
+                    emit()
+                    _collect_comparison_window(app, comparison, pull, client, emit)
+
+            _finish_comparison(app, comparison, emit)
+
+        except Cancelled:
+            logger.info(f'comparison {comparison_id} cancelled by user')
+            _fail_comparison(comparison, TrafficComparison.STATUS_CANCELLED,
+                             'Cancelled. Collected windows were kept.', emit)
+        except WaasApiError as e:
+            logger.error(f'comparison {comparison_id} API error: {e}')
+            _fail_comparison(comparison, TrafficComparison.STATUS_ERROR,
+                             str(e), emit)
+        except Exception as e:  # noqa: BLE001 — terminal-state guarantee
+            logger.error(f'run_traffic_comparison: {traceback.format_exc()}')
+            _fail_comparison(comparison, TrafficComparison.STATUS_ERROR,
+                             str(e), emit)
+        finally:
+            clear_join_signal(session_id)
+
+
+def _collect_comparison_window(app, comparison, pull, client, emit) -> None:
+    """Drive one window to completion through the ordinary pull runner."""
+    from app.logpull.runner import PullRunner
+    from app.logpull.windows import Window
+    from app.models import LogPull
+
+    pull.status = LogPull.STATUS_RUNNING
+    pull.started_at = datetime.utcnow()
+    pull.phase = LogPull.PHASE_COUNTING
+    db.session.commit()
+
+    runner = PullRunner(db, pull, client, app.instance_path,
+                        emit=lambda _payload: emit())
+
+    if not pull.rows_expected:
+        # Only when arming could not supply one — a comparison started from
+        # the wizard carries an exact count per window already.
+        pull.rows_expected = runner.source.count(
+            Window(pull.range_start, pull.range_end))
+        db.session.commit()
+
+    try:
+        pull.result = runner.run()
+    except BaseException as exc:
+        # Whatever stopped this window — cancel, disk, API — the child must
+        # not be left claiming to be RUNNING. A stale active row holds the
+        # portal's single collection slot against every other user, and the
+        # startup reconciler only runs on restart.
+        _finish_pull(pull, LogPull.STATUS_CANCELLED
+                     if exc.__class__.__name__ == 'Cancelled'
+                     else LogPull.STATUS_ERROR,
+                     str(exc) or exc.__class__.__name__, lambda _p: emit())
+        raise
+
+    pull.status = LogPull.STATUS_COMPLETE
+    pull.phase = LogPull.PHASE_DONE
+    pull.completed_at = datetime.utcnow()
+    pull.bytes_on_disk = runner.store.size_bytes()
+    pull.eta_seconds = 0
+    db.session.commit()
+    emit()
+
+
+def _finish_comparison(app, comparison, emit) -> None:
+    """Analyse if every window is in, otherwise park until `after` is due."""
+    from app.logpull.crawlers import RangeVerifier, load_ranges, ranges_cache_dir
+    from app.models import LogPull, Notification, TrafficComparison
+    from app.traffic_comparison import analyze
+
+    after = comparison.window('after')
+    if after is None or after.status != LogPull.STATUS_COMPLETE:
+        comparison.status = TrafficComparison.STATUS_WAITING
+        comparison.current_label = None
+        db.session.commit()
+        emit()
+        return
+
+    comparison.status = TrafficComparison.STATUS_ANALYZING
+    comparison.current_label = None
+    db.session.commit()
+    emit()
+
+    # Verification is what makes a claim about "Googlebot" worth anything, so
+    # it runs by default. An unreachable list leaves crawlers reported as
+    # unverifiable rather than as impostors.
+    try:
+        networks, _meta = load_ranges(ranges_cache_dir(app.instance_path))
+        verifier = RangeVerifier(networks)
+    except Exception:  # noqa: BLE001 — never fail a collection on this
+        logger.warning('comparison %s: crawler ranges unavailable',
+                       comparison.id)
+        verifier = None
+
+    comparison.result = analyze(comparison, app.instance_path, verifier=verifier)
+    comparison.status = TrafficComparison.STATUS_COMPLETE
+    comparison.completed_at = datetime.utcnow()
+    db.session.commit()
+    emit()
+
+    try:
+        Notification.create(
+            user_id=comparison.user_id,
+            type='traffic_comparison',
+            title='Traffic comparison ready',
+            message=(f'The before/after comparison for {comparison.app_name} '
+                     f'has finished collecting and is ready to read.'),
+            link=f'/traffic/compare/{comparison.id}/results',
+        )
+        db.session.commit()
+    except Exception:  # noqa: BLE001 — a missed notice is not a failed run
+        logger.warning('comparison %s: could not raise notification',
+                       comparison.id)
+        db.session.rollback()
+
+
+def _fail_comparison(comparison, status, message, emit) -> None:
+    try:
+        comparison.status = status
+        comparison.error_message = message
+        comparison.completed_at = datetime.utcnow()
+        comparison.current_label = None
+        db.session.commit()
+        emit()
+    except Exception:  # pragma: no cover — defensive
+        logger.error(f'_fail_comparison failed: {traceback.format_exc()}')
+        db.session.rollback()
+
+
+def run_due_comparisons(app) -> int:
+    """Scheduler tick: start any comparison whose `after` window has settled.
+
+    One at a time, and only when no pull holds the slot. Arriving a tick late
+    costs nothing — the window is a fixed range in the past, so the rows do
+    not move while it waits.
+    """
+    from app.models import LogPull, TrafficComparison
+
+    with app.app_context():
+        if LogPull.query.filter(
+                LogPull.status.in_(LogPull.ACTIVE_STATUSES)).first() is not None:
+            return 0
+
+        # An interrupted comparison has settled windows to finish right now,
+        # so it does not wait on `after_due_at`; a waiting one has nothing to
+        # do until its last window has elapsed.
+        due = TrafficComparison.query.filter(
+            TrafficComparison.cancel_requested.is_(False),
+            or_(
+                TrafficComparison.status == TrafficComparison.STATUS_INTERRUPTED,
+                and_(
+                    TrafficComparison.status == TrafficComparison.STATUS_WAITING,
+                    TrafficComparison.after_due_at.isnot(None),
+                    TrafficComparison.after_due_at <= datetime.utcnow(),
+                ),
+            ),
+        ).order_by(TrafficComparison.created_at).first()
+
+        if due is None:
+            return 0
+
+        logger.info('comparison %s: after window is due, resuming', due.id)
+        socketio.start_background_task(
+            run_traffic_comparison, app, due.id, due.session_id, False)
+        return 1
+
+
+def reconcile_interrupted_comparisons(app) -> int:
+    """Return comparisons left mid-collection by a restart to a resumable state.
+
+    Their child pulls are marked interrupted by `reconcile_interrupted_pulls`
+    and keep their day checkpoints, so the work already done is not lost —
+    this only makes the parent eligible to be picked up again.
+    """
+    from app.models import TrafficComparison
+
+    with app.app_context():
+        stale = TrafficComparison.query.filter(
+            TrafficComparison.status.in_(TrafficComparison.BUSY_STATUSES)
+        ).all()
+        for comparison in stale:
+            comparison.status = TrafficComparison.STATUS_INTERRUPTED
+            comparison.current_label = None
+            comparison.error_message = (
+                'Interrupted by a portal restart. Collected windows were '
+                'kept; collection resumes automatically.'
+            )
+            if comparison.after_due_at is None:
+                comparison.after_due_at = datetime.utcnow()
+        if stale:
+            db.session.commit()
+            logger.info(f'Marked {len(stale)} interrupted comparison(s).')
+        return len(stale)
+
+
 def reconcile_interrupted_pulls(app) -> int:
     """Mark pulls left RUNNING by a restart as interrupted.
 
@@ -711,6 +980,8 @@ def run_log_pull_cleanup(app) -> int:
             LogPull.raw_expires_at.isnot(None),
             LogPull.raw_expires_at < now,
             LogPull.status.notin_(LogPull.ACTIVE_STATUSES),
+            # A pinned window belongs to a comparison the user asked to keep.
+            LogPull.pinned.is_(False),
         ).all()
         for pull in raw_due:
             freed += PullStore(app.instance_path, pull.id).delete_raw()
@@ -721,15 +992,64 @@ def run_log_pull_cleanup(app) -> int:
         old = LogPull.query.filter(
             LogPull.created_at < result_cutoff,
             LogPull.status.notin_(LogPull.ACTIVE_STATUSES),
+            # A comparison's windows are governed by their parent, below.
+            # Reaping one here would leave the parent describing a result it
+            # can no longer show the evidence for.
+            LogPull.comparison_id.is_(None),
         ).all()
         for pull in old:
             freed += PullStore(app.instance_path, pull.id).delete_all()
             db.session.delete(pull)
 
-        if raw_due or old:
+        comparisons = _reap_old_comparisons(app, result_cutoff)
+        freed += comparisons['freed']
+
+        if raw_due or old or comparisons['count']:
             db.session.commit()
             logger.info(
                 f'Log pull cleanup: reaped raw for {len(raw_due)}, '
-                f'deleted {len(old)} pull(s), freed {freed / 1e6:.1f} MB.'
+                f'deleted {len(old)} pull(s) and {comparisons["count"]} '
+                f'comparison(s), freed {freed / 1e6:.1f} MB.'
             )
-        return len(raw_due) + len(old)
+        return len(raw_due) + len(old) + comparisons['count']
+
+
+def _reap_old_comparisons(app, cutoff):
+    """Delete expired comparisons together with their windows.
+
+    Parent and children go in one pass because SQLite runs with
+    `PRAGMA foreign_keys = 0` — the declared `ondelete='CASCADE'` never
+    fires, and deleting the parent alone would leave orphaned `log_pulls`
+    rows pointing at nothing, each still owning a directory on disk.
+    See `app/account_deletion.py` for the same discipline.
+    """
+    from app.logpull.store import PullStore
+    from app.models import LogPull, TrafficComparison
+
+    due = TrafficComparison.query.filter(
+        TrafficComparison.created_at < cutoff,
+        TrafficComparison.pinned.is_(False),
+        TrafficComparison.status.notin_(TrafficComparison.BUSY_STATUSES),
+    ).all()
+
+    freed = 0
+    for comparison in due:
+        for pull in list(comparison.windows):
+            freed += PullStore(app.instance_path, pull.id).delete_all()
+            db.session.delete(pull)
+        db.session.delete(comparison)
+
+    # Windows whose parent vanished some other way: without this they would
+    # never be swept, because the pull-level query above skips every row with
+    # a comparison_id set.
+    live = {c.id for c in TrafficComparison.query.with_entities(
+        TrafficComparison.id).all()}
+    orphans = [p for p in LogPull.query.filter(
+        LogPull.comparison_id.isnot(None),
+        LogPull.status.notin_(LogPull.ACTIVE_STATUSES),
+    ).all() if p.comparison_id not in live]
+    for pull in orphans:
+        freed += PullStore(app.instance_path, pull.id).delete_all()
+        db.session.delete(pull)
+
+    return {'count': len(due), 'freed': freed, 'orphans': len(orphans)}

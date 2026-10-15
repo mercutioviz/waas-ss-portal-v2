@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Measure a change') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Traffic Analysis'), url_for('traffic.index')),
+    (_('Comparisons'), url_for('traffic_compare.index')),
+    (_('New'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="mt-4 mb-3">
+    <h2><i class="bi bi-arrow-left-right"></i> {{ _('Measure a change') }}</h2>
+    <p class="text-muted mb-0">
+        {{ _('The window before your change is already in the past, so it is
+             collected now. The window after it is collected automatically
+             once enough time has passed — you can close this page.') }}
+    </p>
+</div>
+
+{% if busy %}
+<div class="alert alert-warning">
+    <i class="bi bi-hourglass-split"></i>
+    {{ _('A collection is already running. Only one runs at a time.') }}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> {{ error }}</div>
+{% endif %}
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">{{ _('What changed') }}</h5></div>
+            <div class="card-body">
+                <form method="get" action="{{ url_for('traffic_compare.new') }}" class="mb-3">
+                    <label class="form-label">{{ _('Account') }}</label>
+                    <select name="account_id" class="form-select" onchange="this.form.submit()">
+                        <option value="">{{ _('Select an account...') }}</option>
+                        {% for acct in accounts %}
+                        <option value="{{ acct.id }}" {% if account and acct.id == account.id %}selected{% endif %}>
+                            {{ acct.account_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </form>
+
+                {% if account %}
+                <form method="post" action="{{ url_for('traffic_compare.create') }}" id="cmpForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="account_id" value="{{ account.id }}">
+                    <input type="hidden" name="app_name" id="appNameField" value="">
+
+                    <div class="mb-3">
+                        <label class="form-label" for="appSelect">{{ _('Application') }}</label>
+                        <select name="app_id" id="appSelect" class="form-select" required>
+                            <option value="">{{ _('Select an application...') }}</option>
+                            {% for a in applications %}
+                            <option value="{{ a.name }}" {% if a.name == app_id %}selected{% endif %}>{{ a.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="changeAt">{{ _('When the change was made (UTC)') }}</label>
+                        <input type="datetime-local" class="form-control plan-field" step="60"
+                               name="change_at" id="changeAt" value="{{ change_at }}" required>
+                        <div class="form-text">
+                            {{ _('Everything before this instant is the baseline; everything
+                                 after it, past the settle time, is the result.') }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="changeNote">{{ _('What you changed') }} <span class="text-muted small">{{ _('(optional)') }}</span></label>
+                        <input type="text" class="form-control" name="change_note" id="changeNote"
+                               maxlength="500" value="{{ change_note }}"
+                               placeholder="{{ _('e.g. 404 for User-Agent containing Google on /media/…') }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="duration">{{ _('Window length') }}</label>
+                        <select name="duration" id="duration" class="form-select plan-field">
+                            {% for seconds, label in duration_choices %}
+                            <option value="{{ seconds }}" {% if seconds == default_duration %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            {{ _('Longer windows are more trustworthy and cost more collection
+                                 time. A full day is immune to time-of-day effects.') }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="controlDays">{{ _('Control days') }}</label>
+                        <select name="control_days" id="controlDays" class="form-select plan-field">
+                            {% for n in range(0, max_control_days + 1) %}
+                            <option value="{{ n }}" {% if n == default_control_days %}selected{% endif %}>
+                                {% if n == 0 %}{{ _('None — not recommended') }}
+                                {% else %}{{ _('%(n)s day(s) before', n=n) }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            {{ _('The same two windows on earlier days, when nothing was
+                                 changed. They measure how much this comparison moves on its
+                                 own — a result inside their range is not a result.') }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="focusUrl">{{ _('URL the change targeted') }} <span class="text-muted small">{{ _('(optional)') }}</span></label>
+                        <input type="text" class="form-control" name="focus_url" id="focusUrl"
+                               maxlength="500" placeholder="/media/example/file.js">
+                        <div class="form-text">
+                            {{ _('Matched as a substring. Reported on its own, broken down by
+                                 who was requesting it — which is the strongest evidence
+                                 available, because it needs no control day.') }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="segments">{{ _('Segments to attribute') }} <span class="text-muted small">{{ _('(optional)') }}</span></label>
+                        <input type="text" class="form-control" name="segments" id="segments"
+                               placeholder="{{ _('left blank: the heaviest by bytes are picked automatically') }}">
+                        <div class="form-text">
+                            {{ _('Comma-separated crawler names. Leaving this blank is usually
+                                 better — the heavy segment is rarely the one you would think
+                                 to type.') }}
+                        </div>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="pinned" value="yes" id="pinned">
+                        <label class="form-check-label" for="pinned">
+                            {{ _('Pin this comparison') }}
+                            <span class="text-muted small">{{ _('— keep its rows past the normal 14-day window') }}</span>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="armBtn" {% if busy %}disabled{% endif %}>
+                        <i class="bi bi-play-fill"></i> {{ _('Start measuring') }}
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">{{ _('What this will collect') }}</h5></div>
+            <div class="card-body" id="estimateBody">
+                <p class="text-muted mb-0">{{ _('Pick an application and a change time.') }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var appSelect = document.getElementById('appSelect');
+    if (!appSelect) { return; }
+
+    var body = document.getElementById('estimateBody');
+    var appNameField = document.getElementById('appNameField');
+    var accountId = {{ account.id if account else 'null' }};
+
+    function debounce(fn, ms) {
+        var timer = null;
+        return function () { clearTimeout(timer); timer = setTimeout(fn, ms); };
+    }
+
+    function val(id) { return document.getElementById(id).value; }
+
+    function refresh() {
+        var appId = appSelect.value;
+        appNameField.value = appId;
+        if (!appId || !val('changeAt')) {
+            body.innerHTML = '<p class="text-muted mb-0">{{ _("Pick an application and a change time.") }}</p>';
+            return;
+        }
+        body.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>{{ _("Counting each window...") }}</div>';
+
+        fetch('{{ url_for("traffic_compare.preflight_estimate") }}', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}'},
+            body: JSON.stringify({
+                account_id: accountId, app_id: appId,
+                change_at: val('changeAt'), duration: val('duration'),
+                control_days: val('controlDays')
+            })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.error) {
+                body.innerHTML = '<div class="text-danger small">' + data.error + '</div>';
+                return;
+            }
+            var rows = '';
+            data.windows.forEach(function (w) {
+                // A window still in the future is projected from `before`, so
+                // say so rather than presenting a guess as a measurement.
+                var note = w.exact
+                    ? ''
+                    : ' <span class="badge bg-secondary-subtle text-secondary-emphasis">{{ _("projected") }}</span>';
+                rows += '<tr><td class="small"><code>' + w.label + '</code>' + note + '</td>'
+                      + '<td class="small text-muted">' + w.when + '</td>'
+                      + '<td class="text-end small">' + w.rows.toLocaleString() + '</td></tr>';
+            });
+
+            body.innerHTML = ''
+                + '<p class="mb-2"><span class="fs-4">' + data.total_rows.toLocaleString() + '</span>'
+                + ' <span class="text-muted">{{ _("requests across") }} ' + data.windows_total + ' {{ _("windows") }}</span></p>'
+                + '<table class="table table-sm mb-3"><tbody>' + rows + '</tbody></table>'
+                + '<div class="d-flex justify-content-between border-top pt-2">'
+                +   '<span>{{ _("Collecting now") }}</span><strong>' + data.now_label + '</strong></div>'
+                + '<div class="d-flex justify-content-between">'
+                +   '<span>{{ _("After the wait") }}</span><strong>' + data.later_label + '</strong></div>'
+                + (data.later_seconds > 0
+                    ? '<div class="form-text mt-2">{{ _("The final window is collected automatically once it has elapsed.") }}</div>'
+                    : '<div class="form-text mt-2">{{ _("Every window has already elapsed — this runs straight through.") }}</div>');
+        })
+        .catch(function () {
+            body.innerHTML = '<div class="text-danger small">{{ _("Could not reach the API.") }}</div>';
+        });
+    }
+
+    var refreshSoon = debounce(refresh, 600);
+    appSelect.addEventListener('change', refresh);
+    document.querySelectorAll('.plan-field').forEach(function (el) {
+        el.addEventListener('change', refreshSoon);
+        el.addEventListener('input', refreshSoon);
+    });
+    refresh();
+})();
+</script>
+{% endblock %}

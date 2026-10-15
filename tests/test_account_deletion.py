@@ -21,7 +21,7 @@ from app.account_deletion import (
 from app.models import (
     AccountShare, AppTrafficSnapshot, AuditLog, ConfigSnapshot, FeatureApplication,
     LogPull, ProxySession, ReportRun, ScheduledReport, SecurityMetricSnapshot,
-    SiteProfile, TemplateApplication, User, WaasAccount,
+    SiteProfile, TemplateApplication, TrafficComparison, User, WaasAccount,
 )
 
 
@@ -103,15 +103,30 @@ def _populate(account, user, snapshots=3):
     pull = _log_pull(account, user, LogPull.STATUS_COMPLETE,
                      session_id=f'pull-sess-{account.id}')
     db.session.add(pull)
+
+    comparison = TrafficComparison(
+        user_id=user.id, account_id=account.id, app_id='app1', app_name='app1',
+        change_at=1_791_300_000, session_id=f'cmp-sess-{account.id}',
+        status=TrafficComparison.STATUS_COMPLETE)
+    db.session.add(comparison)
+    db.session.commit()
+
+    # A comparison's window is an ordinary LogPull carrying the same
+    # account_id, so it is reaped by the log_pulls entry rather than needing
+    # a cascade the pragma would make inert.
+    db.session.add(_log_pull(account, user, LogPull.STATUS_COMPLETE,
+                             session_id=f'cmp-window-{account.id}',
+                             comparison_id=comparison.id,
+                             window_label='before'))
     db.session.commit()
     return report, pull
 
 
-def _log_pull(account, user, status, session_id='pull-sess'):
+def _log_pull(account, user, status, session_id='pull-sess', **extra):
     now = datetime.utcnow()
     return LogPull(user_id=user.id, account_id=account.id, app_id='app1', app_name='app1',
                    range_start=now - timedelta(days=1), range_end=now,
-                   session_id=session_id, status=status)
+                   session_id=session_id, status=status, **extra)
 
 
 class TestChildModelCoverage:

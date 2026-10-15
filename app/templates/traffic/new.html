@@ -76,7 +76,36 @@
                             <label class="form-check-label" for="win{{ days }}">{{ label }}</label>
                         </div>
                         {% endfor %}
-                        <div class="form-text">
+                        <div class="form-check">
+                            <input class="form-check-input window-radio" type="radio" name="window_days"
+                                   id="winCustom" value="custom">
+                            <label class="form-check-label" for="winCustom">
+                                {{ _('Custom range') }}
+                                <span class="text-muted small">{{ _('— any window in the past, up to %(max)s days', max=max_custom_span_days) }}</span>
+                            </label>
+                        </div>
+
+                        <div class="row g-2 mt-1 d-none" id="customRange">
+                            <div class="col-sm-6">
+                                <label class="form-label small mb-1" for="rangeStart">{{ _('Start (UTC)') }}</label>
+                                <input type="datetime-local" class="form-control form-control-sm custom-field"
+                                       name="range_start" id="rangeStart" step="60">
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label small mb-1" for="rangeEnd">{{ _('End (UTC)') }}</label>
+                                <input type="datetime-local" class="form-control form-control-sm custom-field"
+                                       name="range_end" id="rangeEnd" step="60">
+                            </div>
+                            <div class="col-12">
+                                <div class="form-text">
+                                    {{ _('Times are UTC, and the range is half-open — the end second
+                                         is not included. A window ending within %(lag)s seconds of now
+                                         may still be filling and is refused.', lag=ingest_lag_seconds) }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-text" id="presetHelp">
                             {{ _('7 days is usually enough — findings tend to be visible within a
                                  few days. A longer window raises confidence, not detection.') }}
                         </div>
@@ -127,7 +156,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 (function () {
     var appSelect = document.getElementById('appSelect');
@@ -156,6 +185,35 @@
     function selectedWindow() {
         var el = document.querySelector('.window-radio:checked');
         return el ? el.value : '7';
+    }
+
+    var customRange = document.getElementById('customRange');
+    var presetHelp = document.getElementById('presetHelp');
+
+    function syncCustom() {
+        var custom = selectedWindow() === 'custom';
+        customRange.classList.toggle('d-none', !custom);
+        presetHelp.classList.toggle('d-none', custom);
+    }
+
+    // The estimate costs a live count query, so a half-typed range must not
+    // fire one on every keystroke.
+    function debounce(fn, ms) {
+        var timer = null;
+        return function () {
+            clearTimeout(timer);
+            timer = setTimeout(fn, ms);
+        };
+    }
+
+    function rangePayload() {
+        var window_days = selectedWindow();
+        if (window_days !== 'custom') { return {window_days: window_days}; }
+        return {
+            window_days: 'custom',
+            range_start: document.getElementById('rangeStart').value,
+            range_end: document.getElementById('rangeEnd').value
+        };
     }
 
     function renderRow(label, opt, recommended) {
@@ -193,19 +251,31 @@
     function refresh() {
         var appId = appSelect.value;
         appNameField.value = appId;
+        syncCustom();
         if (!appId) {
             body.innerHTML = '<p class="text-muted mb-0">{{ _("Pick an application to size the pull.") }}</p>';
             latest = null;
             syncConfirm();
             return;
         }
+
+        var payload = rangePayload();
+        if (payload.window_days === 'custom' && (!payload.range_start || !payload.range_end)) {
+            body.innerHTML = '<p class="text-muted mb-0">{{ _("Enter a start and end time to size the pull.") }}</p>';
+            latest = null;
+            syncConfirm();
+            return;
+        }
+        payload.account_id = accountId;
+        payload.app_id = appId;
+
         body.innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>{{ _("Counting...") }}</div>';
 
         fetch('{{ url_for("traffic.preflight_estimate") }}', {
             method: 'POST',
             credentials: 'same-origin',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}'},
-            body: JSON.stringify({account_id: accountId, app_id: appId, window_days: selectedWindow()})
+            body: JSON.stringify(payload)
         })
         .then(function (r) { return r.json(); })
         .then(function (data) {
@@ -216,7 +286,7 @@
             latest = data;
             var html = '<p class="mb-2">'
                 + '<span class="fs-4">' + data.total_rows.toLocaleString() + '</span>'
-                + ' <span class="text-muted">{{ _("requests in the last") }} ' + data.window_days + ' {{ _("days") }}</span></p>';
+                + ' <span class="text-muted">{{ _("requests over") }} ' + data.span_label + '</span></p>';
             html += renderRow('{{ _("Sampled") }}', data.options.sample, data.recommended_mode === 'sample');
             html += renderRow('{{ _("Full") }}', data.options.full, data.recommended_mode === 'full');
             if (data.corpus_full) {
@@ -230,13 +300,20 @@
         });
     }
 
+    var refreshSoon = debounce(refresh, 600);
+
     appSelect.addEventListener('change', refresh);
     document.querySelectorAll('.window-radio').forEach(function (el) {
         el.addEventListener('change', refresh);
     });
+    document.querySelectorAll('.custom-field').forEach(function (el) {
+        el.addEventListener('change', refreshSoon);
+        el.addEventListener('input', refreshSoon);
+    });
     document.querySelectorAll('.mode-radio').forEach(function (el) {
         el.addEventListener('change', syncConfirm);
     });
+    syncCustom();
 })();
 </script>
 {% endblock %}

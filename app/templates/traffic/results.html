@@ -15,7 +15,7 @@
     <div>
         <h2 class="mb-1"><i class="bi bi-graph-down-arrow"></i> <code class="fs-4">{{ pull.app_name }}</code></h2>
         <p class="text-muted mb-0">
-            {{ _('%(mode)s collection over %(days)s days', mode=pull.mode|capitalize, days=pull.window_days) }}
+            {{ _('%(mode)s collection over %(range)s', mode=pull.mode|capitalize, range=pull.range_description) }}
             · <span class="badge {{ status_badges.get(pull.status, 'bg-secondary') }}">{{ pull.status }}</span>
         </p>
     </div>

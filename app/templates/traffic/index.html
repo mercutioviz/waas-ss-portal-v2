@@ -70,7 +70,7 @@
                     <tr>
                         <td class="text-muted">{{ pull.id }}</td>
                         <td><code>{{ pull.app_name }}</code></td>
-                        <td>{{ pull.window_days }}d</td>
+                        <td>{{ pull.range_label }}</td>
                         <td>
                             <span class="badge {% if pull.mode == 'full' %}bg-dark{% else %}bg-secondary{% endif %}">
                                 {{ pull.mode }}

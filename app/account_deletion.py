@@ -43,7 +43,7 @@ from app import db
 from app.models import (
     AccountShare, AppTrafficSnapshot, ConfigSnapshot, FeatureApplication,
     LogPull, ProxySession, ReportRun, ScheduledReport, SecurityMetricSnapshot,
-    SiteProfile, TemplateApplication, WaasAccount,
+    SiteProfile, TemplateApplication, TrafficComparison, WaasAccount,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,10 @@ CHILD_MODELS = [
     ('security_metric_snapshots', SecurityMetricSnapshot, _l('Security metric snapshots')),
     ('app_traffic_snapshots', AppTrafficSnapshot, _l('Traffic snapshots')),
     ('log_pulls', LogPull, _l('Log pulls')),
+    # Listed after log_pulls only for readability — the pragma means nothing
+    # enforces an order, and a comparison's windows are plain LogPull rows
+    # carrying the same account_id, so they go with the line above.
+    ('traffic_comparisons', TrafficComparison, _l('Traffic comparisons')),
 ]
 
 
@@ -106,6 +110,17 @@ def account_delete_blockers(account):
         blockers.append(_(
             '%(count)d log pull(s) are still running. Cancel them first.',
             count=active_pulls,
+        ))
+
+    busy_comparisons = TrafficComparison.query.filter(
+        TrafficComparison.account_id == account.id,
+        TrafficComparison.status.in_(TrafficComparison.BUSY_STATUSES),
+    ).count()
+    if busy_comparisons:
+        blockers.append(_(
+            '%(count)d traffic comparison(s) are still collecting. '
+            'Cancel them first.',
+            count=busy_comparisons,
         ))
 
     active_profiles = SiteProfile.query.filter(

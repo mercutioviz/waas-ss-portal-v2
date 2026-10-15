@@ -12,7 +12,7 @@ from flask_apscheduler import APScheduler
 from flask_socketio import SocketIO
 from werkzeug.middleware.proxy_fix import ProxyFix
 from config import config
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 
 # Initialize extensions
 db = SQLAlchemy()
@@ -146,6 +146,66 @@ def create_app(config_name='default'):
         except (ValueError, TypeError, OSError):
             return str(value)
 
+    @app.template_filter('epoch_s')
+    def epoch_s_format(value, fmt='%Y-%m-%d %H:%M'):
+        """Epoch *seconds* to a UTC string.
+
+        Separate from `epoch_ms` because the two units are impossible to tell
+        apart by inspection and getting it wrong lands the reader in 1970 or
+        in the year 58000. Log rows carry milliseconds; window boundaries and
+        comparison change times carry seconds.
+        """
+        if value is None:
+            return '—'
+        try:
+            return datetime.fromtimestamp(int(value), tz=dt_timezone.utc).strftime(fmt)
+        except (ValueError, TypeError, OSError):
+            return str(value)
+
+    @app.template_filter('si_bytes')
+    def si_bytes_filter(value, places=2):
+        """Decimal (SI) byte sizes — kB/MB/GB/TB.
+
+        Distinct from `filesizeformat`, which is binary. Bandwidth figures are
+        quoted in decimal units everywhere else in this domain, and mixing the
+        two makes two numbers describing the same traffic disagree by 7%.
+        """
+        if value is None:
+            return '—'
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        sign = '-' if value < 0 else ''
+        value = abs(value)
+        for limit, unit in ((1e12, 'TB'), (1e9, 'GB'), (1e6, 'MB'), (1e3, 'kB')):
+            if value >= limit:
+                return f'{sign}{value / limit:.{places}f} {unit}'
+        return f'{sign}{value:,.0f} B'
+
+    @app.template_filter('signed_pct')
+    def signed_pct_filter(value, places=1):
+        """A fraction as a signed percentage, or an em-dash when unknowable.
+
+        `None` stays `None`: a change from a zero baseline has no percentage,
+        and rendering one as `+100%` or `+inf%` invents a measurement.
+        """
+        if value is None:
+            return '—'
+        try:
+            return f'{float(value) * 100:+.{places}f}%'
+        except (TypeError, ValueError):
+            return str(value)
+
+    @app.template_filter('plain_pct')
+    def plain_pct_filter(value, places=1):
+        if value is None:
+            return '—'
+        try:
+            return f'{float(value) * 100:.{places}f}%'
+        except (TypeError, ValueError):
+            return str(value)
+
     @app.template_filter('null_dash')
     def null_dash_filter(value):
         """Replace WaaS null marker '"-"' with an em-dash for display."""
@@ -228,7 +288,7 @@ def create_app(config_name='default'):
         return {'csrf_token': generate_csrf}
 
     # Register blueprints
-    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features, profiler, config_history, search, review, traffic
+    from app.routes import main, auth, admin, accounts, applications, certificates, logs, proxy, templates, reports, features, profiler, config_history, search, review, traffic, traffic_compare
     from app.routes import help as help_bp
     app.register_blueprint(main.bp)
     app.register_blueprint(auth.bp)
@@ -248,6 +308,7 @@ def create_app(config_name='default'):
     app.register_blueprint(search.bp)
     app.register_blueprint(review.bp)
     app.register_blueprint(traffic.bp)
+    app.register_blueprint(traffic_compare.bp)
 
     # Register SocketIO event handlers
     from app import socketio_events  # noqa: F401
@@ -312,7 +373,8 @@ def create_app(config_name='default'):
             and not app.config.get('TESTING'):
         from app.background_tasks import (
             run_site_profile_cleanup, capture_security_metrics, run_security_metric_cleanup,
-            reconcile_interrupted_pulls, run_log_pull_cleanup,
+            reconcile_interrupted_comparisons, reconcile_interrupted_pulls,
+            run_due_comparisons, run_log_pull_cleanup,
             run_traffic_hint_cleanup,
         )
         from app.report_service import run_scheduled_reports
@@ -322,6 +384,9 @@ def create_app(config_name='default'):
         # checkpoints remain on disk and it can be resumed.
         try:
             reconcile_interrupted_pulls(app)
+            # Order matters: the children are marked first, so the parent is
+            # made resumable only once its windows are in a known state.
+            reconcile_interrupted_comparisons(app)
         except Exception:  # noqa: BLE001 — never block startup on this
             app.logger.exception('Failed to reconcile interrupted log pulls')
 
@@ -351,6 +416,15 @@ def create_app(config_name='default'):
         @scheduler.task('cron', id='cleanup_log_pulls', hour=3, minute=57, misfire_grace_time=3600)
         def _cleanup_log_pulls_job():
             run_log_pull_cleanup(app)
+
+        # A comparison's "after" window is collected here rather than by a
+        # greenlet parked for hours. Five minutes is granular enough: the
+        # window is a fixed range in the past, so arriving a tick late costs
+        # nothing.
+        @scheduler.task('interval', id='run_due_comparisons', minutes=5,
+                        misfire_grace_time=600)
+        def _run_due_comparisons_job():
+            run_due_comparisons(app)
 
         scheduler.start()
 

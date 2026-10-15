@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% from "macros/page.html" import breadcrumbs %}
+{% block title %}{{ _('Before/After Comparisons') }} — WaaS Portal{% endblock %}
+
+{% block breadcrumbs %}
+{{ breadcrumbs([
+    (_('Dashboard'), url_for('main.dashboard')),
+    (_('Traffic Analysis'), url_for('traffic.index')),
+    (_('Comparisons'), None)
+]) }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-arrow-left-right"></i> {{ _('Before/After Comparisons') }}</h2>
+        <p class="text-muted mb-0">
+            {{ _('Measure what a configuration change did to traffic, with the
+                 same windows on earlier days as a control.') }}
+        </p>
+    </div>
+    <a href="{{ url_for('traffic_compare.new') }}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> {{ _('Measure a change') }}
+    </a>
+</div>
+
+{% if busy %}
+<div class="alert alert-info">
+    <i class="bi bi-hourglass-split"></i>
+    {{ _('A collection is running. Only one runs at a time — the portal has a
+         single worker, so a second would slow both without finishing sooner.') }}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if comparisons.items %}
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>{{ _('Application') }}</th>
+                    <th>{{ _('Change at (UTC)') }}</th>
+                    <th>{{ _('Windows') }}</th>
+                    <th>{{ _('Status') }}</th>
+                    <th class="text-end">{{ _('Progress') }}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in comparisons.items %}
+                <tr>
+                    <td>
+                        <code>{{ c.app_name }}</code>
+                        {% if c.change_note %}
+                        <div class="text-muted small">{{ c.change_note }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="small">{{ c.change_at | epoch_s }}</td>
+                    <td class="small text-muted">
+                        {{ c.windows_done }} / {{ c.windows_total }}
+                        {% if c.control_days %}
+                        · {{ _('%(n)s control day(s)', n=c.control_days) }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {{ status_badges.get(c.status, 'bg-secondary') }}">{{ c.status }}</span>
+                        {% if c.pinned %}
+                        <i class="bi bi-pin-angle-fill text-muted ms-1" title="{{ _('Pinned — exempt from the retention sweep') }}"></i>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">{{ c.percent }}%</td>
+                    <td class="text-end">
+                        {% if c.status == 'complete' %}
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="{{ url_for('traffic_compare.results', comparison_id=c.id) }}">{{ _('Results') }}</a>
+                        {% else %}
+                        <a class="btn btn-sm btn-outline-secondary"
+                           href="{{ url_for('traffic_compare.watch', comparison_id=c.id) }}">{{ _('Progress') }}</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="p-4 text-center text-muted">
+            <i class="bi bi-arrow-left-right fs-1 d-block mb-2"></i>
+            <p class="mb-1">{{ _('No comparisons yet.') }}</p>
+            <p class="small mb-0">
+                {{ _('After you change a caching rule, a rewrite or a response
+                     page, measure it here — the portal collects the window
+                     either side and tells you what moved.') }}
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if comparisons.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination justify-content-center">
+        {% for page_num in comparisons.iter_pages() %}
+        <li class="page-item {% if page_num == comparisons.page %}active{% endif %} {% if not page_num %}disabled{% endif %}">
+            {% if page_num %}
+            <a class="page-link" href="{{ url_for('traffic_compare.index', page=page_num) }}">{{ page_num }}</a>
+            {% else %}
+            <span class="page-link">…</span>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}
