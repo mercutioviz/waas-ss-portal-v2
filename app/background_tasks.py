@@ -657,6 +657,60 @@ def run_robots_proposal(app, pull_id: int, current_text=None) -> None:
                       room=pull.session_id)
 
 
+def run_abuse_analysis(app, pull_id: int) -> None:
+    """Profile per-address behaviour over the rows on disk.
+
+    Two streaming passes like the robots proposal — one to find the addresses
+    worth profiling, one to profile them — so this is seconds to a couple of
+    minutes depending on corpus size, and still far too long for a request.
+
+    The crawler prefix lists are refreshed first so verified crawlers can be
+    separated from the addresses that merely claim to be them. That fetch is
+    best-effort: `load_ranges` never raises, and without it every crawler is
+    reported as unverifiable rather than as an impostor.
+    """
+    from app.logpull.abuse import analyze_pull as analyze_abuse
+    from app.logpull.crawlers import ranges_cache_dir
+    from app.logpull.store import PullStore
+    from app.models import LogPull
+
+    with app.app_context():
+        pull = db.session.get(LogPull, pull_id)
+        if pull is None:
+            logger.error(f'run_abuse_analysis: no LogPull with id={pull_id}')
+            return
+
+        state = {'last': 0.0}
+
+        def on_progress(rows):
+            now = time.monotonic()
+            if now - state['last'] < ANALYSIS_EMIT_INTERVAL_SECONDS:
+                return
+            state['last'] = now
+            socketio.emit('logpull_progress',
+                          {**pull.to_dict(), 'abuse_rows': rows},
+                          room=pull.session_id)
+
+        report = pull.report or {}
+        try:
+            store = PullStore(app.instance_path, pull.id)
+            report['abuse'] = analyze_abuse(
+                store, pull.result or {},
+                ranges_dir=ranges_cache_dir(app.instance_path),
+                on_progress=on_progress,
+            )
+        except Exception as e:  # noqa: BLE001 — a failed profile is reportable
+            logger.error(f'run_abuse_analysis error: {traceback.format_exc()}')
+            report['abuse'] = {'error': str(e)[:300], 'suspects': [],
+                               'crawlers': [], 'findings': []}
+        # `report` is a plain property over a Text column, so the dict has to
+        # be reassigned — mutating it in place never marks the column dirty.
+        pull.report = report
+        db.session.commit()
+        socketio.emit('logpull_abuse_done', {'pull_id': pull.id},
+                      room=pull.session_id)
+
+
 def _finish_pull(pull, status, message, emit):
     """Write a terminal status, tolerating a broken session."""
     from app.models import LogPull

@@ -169,6 +169,59 @@
 </div>
 {% endmacro %}
 
+{# Outside the cache-analysis conditional on purpose: the per-address profile
+   reads the raw rows directly and does not depend on the cache analysis having
+   been run, so the entry point has to be reachable without one. #}
+{% set abuse = (pull.report or {}).get('abuse') or {} %}
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">{{ _('Client behaviour') }}</h5>
+        <div class="d-flex gap-2">
+            {% if abuse %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('traffic.abuse_results', pull_id=pull.id) }}">
+                <i class="bi bi-list-ul"></i> {{ _('View') }}
+            </a>
+            {% endif %}
+            {% if can_analyze %}
+            <form method="post" action="{{ url_for('traffic.abuse_analysis_route', pull_id=pull.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-shield-exclamation"></i>
+                    {% if abuse %}{{ _('Re-run') }}{% else %}{{ _('Profile addresses') }}{% endif %}
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-body">
+        {% if not abuse %}
+        <p class="text-muted mb-0">
+            {{ _('Score every client address on how much its behaviour looks like a '
+                 'script rather than a browser — missing asset fetches, absent cookies, '
+                 'machine-regular timing, rotating User-Agents. Independent of which '
+                 'URLs the address asked for, so it catches scanners and scrapers that '
+                 'never touch a login page.') }}
+        </p>
+        {% elif abuse.get('error') %}
+        <div class="alert alert-danger mb-0">{{ abuse['error'] }}</div>
+        {% else %}
+        <p class="mb-0">
+            {% if abuse.get('flagged_high') %}
+            <span class="badge bg-danger">{{ '{:,}'.format(abuse['flagged_high']) }}</span>
+            {{ _('address(es) behaving like automated abuse') }}
+            {% else %}
+            {{ _('No address scored as high-confidence abuse.') }}
+            {% endif %}
+            <span class="text-muted">
+                · {{ _('%(n)s profiled, %(c)s known crawlers',
+                       n='{:,}'.format(abuse.get('profiled_ips') or 0),
+                       c='{:,}'.format(abuse.get('crawlers_total') or 0)) }}
+            </span>
+        </p>
+        {% endif %}
+    </div>
+</div>
+
 {% if analysis.get('error') %}
 <div class="alert alert-danger">
     <i class="bi bi-exclamation-triangle"></i>

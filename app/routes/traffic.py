@@ -13,6 +13,8 @@
     POST /traffic/<id>/audit            — live header audit of the busiest assets
     POST /traffic/<id>/robots           — generate and measure a robots.txt proposal
     GET  /traffic/<id>/robots.txt       — download the measured file
+    POST /traffic/<id>/abuse            — profile per-address behaviour over the rows
+    GET  /traffic/<id>/abuse            — scored addresses, crawler lane, rollups
     GET  /traffic/<id>/report           — customer-facing report, split by owner
     GET  /traffic/<id>/report.html      — the same report as a self-contained download
 
@@ -38,6 +40,7 @@ from flask_login import current_user, login_required
 
 from app import db, socketio
 from app.background_tasks import (
+    run_abuse_analysis,
     run_header_audit,
     run_log_pull,
     run_log_pull_analysis,
@@ -640,6 +643,53 @@ def robots_download(pull_id):
         text, mimetype='text/plain; charset=utf-8',
         headers={'Content-Disposition':
                  f'attachment; filename="{safe}.robots.txt"'})
+
+
+@bp.route('/<int:pull_id>/abuse', methods=['POST'])
+@login_required
+def abuse_analysis_route(pull_id):
+    """Profile per-address behaviour over the rows on disk.
+
+    Reads the whole corpus twice, so it carries the same guards as the other
+    corpus-reading analyses: not while the pull is still working, and not
+    after the retention sweep has taken the rows away.
+    """
+    pull = _get_pull_or_404(pull_id)
+    if pull.is_active or pull.phase == LogPull.PHASE_ANALYZING:
+        flash(_('That pull is still working. Wait for it to finish.'), 'info')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+    if pull.raw_deleted:
+        flash(_('The raw rows for that pull have expired, so there is nothing '
+                'left to profile. Start a new pull.'), 'warning')
+        return redirect(url_for('traffic.pull_results', pull_id=pull.id))
+
+    AuditLog.log(
+        user_id=current_user.id, action='logpull_abuse',
+        details=f'Per-address abuse profile for log pull #{pull.id} '
+                f'({pull.app_name})',
+    )
+
+    real_app = current_app._get_current_object()
+    socketio.start_background_task(run_abuse_analysis, real_app, pull.id)
+    flash(_('Profiling client addresses. This reads every row twice — reload '
+            'in a moment to see the results.'), 'info')
+    return redirect(url_for('traffic.abuse_results', pull_id=pull.id))
+
+
+@bp.route('/<int:pull_id>/abuse')
+@login_required
+def abuse_results(pull_id):
+    """Scored addresses, the crawler lane, and the group rollups."""
+    pull = _get_pull_or_404(pull_id)
+    abuse = (pull.report or {}).get('abuse') or {}
+    return render_template(
+        'traffic/abuse.html',
+        pull=pull,
+        abuse=abuse,
+        status_badges=STATUS_BADGES,
+        can_analyze=not pull.raw_deleted and not pull.is_active
+        and pull.phase != LogPull.PHASE_ANALYZING,
+    )
 
 
 def _report_document(pull):
