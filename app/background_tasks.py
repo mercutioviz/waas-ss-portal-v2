@@ -466,6 +466,24 @@ def run_log_pull(app, pull_id: int, session_id: str) -> None:
                                                      runner.store)
 
             pull.result = summary
+            db.session.commit()
+
+            # Before STATUS_COMPLETE, not after: watch.html redirects to the
+            # results page the moment it sees that status, so follow-ups that
+            # ran afterwards would leave the user staring at cards that fill
+            # in behind them with no indication more was coming.
+            #
+            # Guarded again out here even though `_run_followups` catches its
+            # own: the collection is hours of work and the follow-ups are a
+            # nicety, so there is no failure in them worth converting a
+            # finished pull into an errored one.
+            try:
+                _run_followups(app, pull, emit)
+            except Exception:  # noqa: BLE001 — never lose a completed collection
+                logger.error(f'pull {pull.id} follow-ups failed: '
+                             f'{traceback.format_exc()}')
+                db.session.rollback()
+
             pull.status = LogPull.STATUS_COMPLETE
             pull.phase = LogPull.PHASE_DONE
             pull.completed_at = datetime.utcnow()
@@ -499,6 +517,66 @@ def run_log_pull(app, pull_id: int, session_id: str) -> None:
 #: loop over millions of rows; a socket write per chunk would cost more than
 #: the parsing.
 ANALYSIS_EMIT_INTERVAL_SECONDS = 2.0
+
+
+def _run_followups(app, pull, emit):
+    """Run the opt-in origin follow-ups for a freshly collected pull.
+
+    Both of these send live requests to the customer's own web servers, which
+    collecting logs never does, so they happen only when the user ticked the
+    box on the form. The consent is read off the row rather than passed in:
+    a pull can be resumed after a service restart and the answer has to
+    survive that.
+
+    Nothing in here is allowed to fail the pull. The rows are on disk and the
+    collection is the expensive part — the same rule `_analyze_collected`
+    follows, for the same reason.
+    """
+    from app.models import LogPull
+
+    if not pull.auto_followups:
+        return
+
+    # Probing an origin on the strength of an analysis that blew up would be
+    # sending real traffic on the basis of nothing.
+    analysis = (pull.result or {}).get('analysis') or {}
+    if analysis.get('error'):
+        logger.info('pull %s: skipping follow-ups, analysis errored', pull.id)
+        return
+
+    report = pull.report or {}
+
+    try:
+        if analysis.get('audit_targets'):
+            pull.phase = LogPull.PHASE_PROBING
+            db.session.commit()
+            emit(pull.to_dict())
+            report['header_audit'] = _header_audit_for(pull)
+        else:
+            logger.info('pull %s: no audit targets, skipping header audit',
+                        pull.id)
+    except Exception:  # noqa: BLE001 — a probe must never cost a collection
+        logger.error(f'pull {pull.id} auto header audit failed: '
+                     f'{traceback.format_exc()}')
+
+    try:
+        pull.phase = LogPull.PHASE_PROPOSING
+        db.session.commit()
+        emit(pull.to_dict())
+        # No pasted text: there is no user present to paste any. The fragment
+        # records that, and the results page says so.
+        report['robots'] = _robots_proposal_for(app, pull, auto=True)
+    except Exception:  # noqa: BLE001 — same rule as the audit
+        logger.error(f'pull {pull.id} auto robots proposal failed: '
+                     f'{traceback.format_exc()}')
+
+    try:
+        pull.report = report
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        logger.error(f'pull {pull.id} could not store follow-up results: '
+                     f'{traceback.format_exc()}')
+        db.session.rollback()
 
 
 def _analyze_collected(app, pull, summary, emit, store=None):
@@ -573,14 +651,37 @@ def run_log_pull_analysis(app, pull_id: int) -> None:
             db.session.commit()
 
 
+def _header_audit_for(pull):
+    """Probe this pull's audit targets and return the report fragment.
+
+    Shared by the explicit button and the opt-in chain so there is one
+    implementation of what a probe run means. Never raises: the audit is
+    best-effort and a failure has to leave a readable card, not a failed pull.
+    """
+    from app.logpull.header_audit import audit
+
+    analysis = (pull.result or {}).get('analysis') or {}
+    targets = analysis.get('audit_targets') or []
+    try:
+        result = audit(targets)
+    except Exception as e:  # noqa: BLE001 — the audit is best-effort
+        logger.error(f'header audit for pull {pull.id} failed: '
+                     f'{traceback.format_exc()}')
+        result = {
+            'error': str(e)[:300], 'assets': [], 'findings': [],
+            'probed': 0, 'requested': len(targets),
+        }
+    result['skipped_hosts'] = analysis.get('audit_skipped_hosts') or []
+    return result
+
+
 def run_header_audit(app, pull_id: int) -> None:
     """Probe the busiest static assets live and record what came back.
 
-    Separate from the pull on purpose: this sends real requests to the
-    customer's origin, so it is something a user asks for explicitly rather
-    than a side effect of collecting logs.
+    Sends real requests to the customer's origin, so it happens either because
+    a user pressed the button or because they ticked `auto_followups` when
+    starting the pull — never as an unannounced side effect of collecting logs.
     """
-    from app.logpull.header_audit import audit
     from app.models import LogPull
 
     with app.app_context():
@@ -589,18 +690,8 @@ def run_header_audit(app, pull_id: int) -> None:
             logger.error(f'run_header_audit: no LogPull with id={pull_id}')
             return
 
-        analysis = (pull.result or {}).get('analysis') or {}
-        targets = analysis.get('audit_targets') or []
         report = pull.report or {}
-        try:
-            report['header_audit'] = audit(targets)
-        except Exception as e:  # noqa: BLE001 — the audit is best-effort
-            logger.error(f'run_header_audit error: {traceback.format_exc()}')
-            report['header_audit'] = {
-                'error': str(e)[:300], 'assets': [], 'findings': [],
-                'probed': 0, 'requested': len(targets),
-            }
-        report['header_audit']['skipped_hosts'] = analysis.get('audit_skipped_hosts') or []
+        report['header_audit'] = _header_audit_for(pull)
         pull.report = report
         db.session.commit()
         socketio.emit('logpull_audit_done', {'pull_id': pull.id},
@@ -619,9 +710,6 @@ def run_robots_proposal(app, pull_id: int, current_text=None) -> None:
     for /robots.txt goes through WaaS, which rewrites the response. Without
     it, `build_report` falls back to fetching and records what it got.
     """
-    from app.logpull.analysis import is_auditable_host
-    from app.logpull.robots import build_report
-    from app.logpull.store import PullStore
     from app.models import LogPull
 
     with app.app_context():
@@ -642,19 +730,46 @@ def run_robots_proposal(app, pull_id: int, current_text=None) -> None:
                           room=pull.session_id)
 
         report = pull.report or {}
-        try:
-            store = PullStore(app.instance_path, pull.id)
-            report['robots'] = build_report(
-                store, pull.result or {}, current_text=current_text,
-                check_host=is_auditable_host, on_progress=on_progress)
-        except Exception as e:  # noqa: BLE001 — a failed proposal is reportable
-            logger.error(f'run_robots_proposal error: {traceback.format_exc()}')
-            report['robots'] = {'error': str(e)[:300], 'host': None,
-                                'findings': [], 'proposal': None}
+        report['robots'] = _robots_proposal_for(
+            app, pull, current_text=current_text, on_progress=on_progress)
         pull.report = report
         db.session.commit()
         socketio.emit('logpull_robots_done', {'pull_id': pull.id},
                       room=pull.session_id)
+
+
+def _robots_proposal_for(app, pull, *, current_text=None, on_progress=None,
+                         auto=False):
+    """Build this pull's robots.txt proposal and return the report fragment.
+
+    Shared by the explicit button and the opt-in chain. Never raises — a failed
+    proposal is something to report on the card, not something that should
+    cost the user a completed collection.
+
+    `auto` records that nobody was present to paste the origin's file, which
+    the results page uses to say so. The distinction matters more here than it
+    looks: WaaS rewrites /robots.txt on the way through, so a fetched copy is
+    not the file the origin serves, and every "what your current file stops"
+    figure is measured against whatever `current_text` ended up being.
+    """
+    from app.logpull.analysis import is_auditable_host
+    from app.logpull.robots import build_report
+    from app.logpull.store import PullStore
+
+    try:
+        store = PullStore(app.instance_path, pull.id)
+        result = build_report(
+            store, pull.result or {}, current_text=current_text,
+            check_host=is_auditable_host, on_progress=on_progress)
+    except Exception as e:  # noqa: BLE001 — a failed proposal is reportable
+        logger.error(f'robots proposal for pull {pull.id} failed: '
+                     f'{traceback.format_exc()}')
+        result = {'error': str(e)[:300], 'host': None,
+                  'findings': [], 'proposal': None}
+    # True only when the portal fetched the file itself. A manual re-run with
+    # pasted text clears this, which is the precedence we want.
+    result['auto_generated'] = bool(auto) and current_text is None
+    return result
 
 
 def run_abuse_analysis(app, pull_id: int) -> None:

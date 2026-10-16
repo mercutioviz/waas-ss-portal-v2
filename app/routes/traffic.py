@@ -306,6 +306,10 @@ def create_pull():
     app_name = (request.form.get('app_name') or app_id).strip()
     mode = request.form.get('mode') or MODE_SAMPLE
     confirmed = request.form.get('confirm_full') == 'yes'
+    # An unchecked box submits nothing, so absence is a deliberate no — which
+    # is the right default for anything that sends traffic to a customer's
+    # origin.
+    auto_followups = request.form.get('auto_followups') == 'yes'
 
     if mode not in (MODE_SAMPLE, MODE_FULL):
         mode = MODE_SAMPLE
@@ -376,6 +380,7 @@ def create_pull():
         sample_slot_seconds=DEFAULT_SAMPLE_SLOT,
         session_id=session_id,
         rows_expected=option['rows'],
+        auto_followups=auto_followups,
         status=LogPull.STATUS_PENDING,
         phase=LogPull.PHASE_QUEUED,
     )
@@ -386,7 +391,8 @@ def create_pull():
         user_id=current_user.id,
         action='logpull_start',
         details=f'{mode} pull of {app_name} over {pull.range_description} '
-                f'(~{option["rows"]:,} rows, est. {format_duration(option["seconds"])})',
+                f'(~{option["rows"]:,} rows, est. {format_duration(option["seconds"])})'
+                f'{"; will probe origin on completion" if auto_followups else ""}',
     )
 
     # Pre-create the join-signal Event synchronously, before spawning the

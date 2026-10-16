@@ -136,6 +136,21 @@
                         </label>
                     </div>
 
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="auto_followups"
+                               value="yes" id="autoFollowups" checked>
+                        <label class="form-check-label" for="autoFollowups">
+                            {{ _('Probe the origin when collection finishes') }}
+                            <span class="d-block small text-muted">
+                                {{ _('Runs the cache-header audit and the robots.txt proposal '
+                                     'automatically. Both send real requests to this '
+                                     'application\'s own web servers — collecting logs on its '
+                                     'own never does. Untick to collect only; the buttons on '
+                                     'the results page stay available either way.') }}
+                            </span>
+                        </label>
+                    </div>
+
                     <button type="submit" class="btn btn-primary" id="startBtn" {% if active %}disabled{% endif %}>
                         <i class="bi bi-play-fill"></i> {{ _('Start analysis') }}
                     </button>

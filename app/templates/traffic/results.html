@@ -770,6 +770,17 @@
         <div class="alert alert-danger">{{ robots['error'] }}</div>
         {% endif %}
 
+        {% if robots.get('auto_generated') %}
+        <div class="alert alert-info small">
+            <i class="bi bi-info-circle"></i>
+            {{ _('Generated automatically when the collection finished, so nobody was '
+                 'there to paste the file your origin serves. The comparison below is '
+                 'measured against /robots.txt <strong>as WaaS serves it</strong>, which '
+                 'is not the same file — WaaS rewrites it on the way through. Paste the '
+                 'origin\'s copy below and re-run for a more accurate answer.') | safe }}
+        </div>
+        {% endif %}
+
         {% for f in robots.get('findings', []) %}{{ finding_card(f) }}{% endfor %}
 
         {% if measured %}

@@ -1022,6 +1022,12 @@ class LogPull(db.Model):
     PHASE_COUNTING = 'counting'
     PHASE_FETCHING = 'fetching'
     PHASE_ANALYZING = 'analyzing'
+    #: The two opt-in follow-ups, which send live requests to the customer's
+    #: origin. They run before the status flips to complete, because the watch
+    #: page redirects on that flip and would otherwise land the user on a
+    #: results page whose cards are still filling in.
+    PHASE_PROBING = 'probing'
+    PHASE_PROPOSING = 'proposing'
     PHASE_DONE = 'done'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -1060,6 +1066,13 @@ class LogPull(db.Model):
     current_window_start = db.Column(db.Integer, nullable=True)
     eta_seconds = db.Column(db.Integer, nullable=True)
     truncated_windows = db.Column(db.Integer, nullable=False, default=0)
+
+    #: Run the header audit and robots.txt proposal when collection finishes.
+    #: Stored on the row rather than passed to the task because a pull can be
+    #: resumed after a service restart, and the user's consent to probe their
+    #: origin has to survive that. Off for every pull created before the
+    #: option existed.
+    auto_followups = db.Column(db.Boolean, nullable=False, default=False)
 
     # --- retention ---
     raw_expires_at = db.Column(db.DateTime, nullable=True, index=True)
