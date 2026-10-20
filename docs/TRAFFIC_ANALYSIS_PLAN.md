@@ -387,9 +387,14 @@ invented one is worse than a blank cell.
 
 ## 8. Open calls
 
+**Still open as of `v2.0.0` (2026-10-20).** These were consciously left
+unresolved for the release rather than forgotten — each is a product decision,
+not a defect. Carried into `CHANGELOG.md` under "Known limitations".
+
 1. **Full mode on very large apps.** 37 h for ICC 30d. Hard-refuse above a
-   threshold, or allow with a typed confirmation?
+   threshold, or allow with a typed confirmation? *Today: neither — the
+   pre-flight estimate is the only guard.*
 2. **Concurrent pulls.** One worker, one event loop — recommend serializing to
-   one active pull at a time, queueing the rest.
+   one active pull at a time, queueing the rest. *Today: not serialized.*
 3. **Scheduled/recurring pulls.** APScheduler is already present. Worth it, or
-   on-demand only for v1?
+   on-demand only for v1? *Today: on-demand only.*

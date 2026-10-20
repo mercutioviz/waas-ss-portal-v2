@@ -21,6 +21,11 @@ v2 was seeded from v1 on 2026-08-12 as a working baseline. From this point on th
 
 Framing themes (from the brainstorm): guided outcomes over exposed API surface; show me what's happening; configuration as a product (not a form); first-class onboarding.
 
+**All five shipped as of `v2.0.0` (2026-10-20)**, along with an unplanned sixth track —
+traffic reduction analysis (log pulls, cache/crawler/abuse analysis, robots.txt
+proposals, before/after comparison). See `CHANGELOG.md`. The goals above are now the
+record of what v2 set out to do, not a to-do list.
+
 ## Running v2
 
 ```bash
@@ -82,7 +87,17 @@ Flask 3.1 / Python 3.13. Application factory in `app/__init__.py` → `create_ap
 | `reports` | `/reports` | Scheduled email reports |
 | `templates` | `/templates` | Config templates (CRUD, apply, bulk-apply) |
 | `features` (a.k.a. `/raw-configs`) | `/raw-configs` | Raw-config library, predefined configs |
+| `features_legacy` | `/features` | 301 redirect to `/raw-configs/*` |
 | `help` | `/help` | Contextual help pages |
+| `profiler` | `/profiler` | Web app profiler + guided "new site" wizard (goal 1) |
+| `config_history` | `/config-history` | Config snapshots, diffs, one-click rollback (goal 2) |
+| `review` | `/review` | Account/config review report |
+| `search` | `/search` | Global search backing the command palette (goal 5) |
+| `traffic` | `/traffic` | Log pulls, cache/crawler/abuse analysis, robots.txt proposals |
+| `traffic_compare` | `/traffic/compare` | Before/after traffic comparison across a config change |
+
+Note the registration order for the two traffic blueprints: `traffic` owns `/traffic`
+and `traffic_compare` owns the more specific `/traffic/compare`.
 
 **Key modules:**
 - `app/waas_client.py` — `WaasClient` wrapping WaaS v2 + v4
@@ -169,4 +184,4 @@ When v2 reaches feature parity + the new features:
 - Assume the WaaS API surface is the source of truth for what's possible — read `app/waas_client.py` before proposing new integrations, and consult the Swagger UIs above for field-level detail.
 - Don't preserve v1 behavior for its own sake. v2 exists to change things — if a v1 pattern is bad, redesign it.
 - Confirm before touching systemd, nginx, or `/etc/`.
-- No test suite exists yet; the first substantial new feature is a good moment to introduce pytest.
+- A pytest suite lives in `tests/` (38 files, ~1200 tests; `python -m pytest -q`, about two minutes). Extend it alongside new features — don't bootstrap a second one.
