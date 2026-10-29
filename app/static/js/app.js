@@ -75,6 +75,12 @@ document.addEventListener('DOMContentLoaded', function () {
         form.addEventListener('submit', function () {
             // Skip if form has validation and is invalid
             if (form.classList.contains('needs-validation') && !form.checkValidity()) return;
+            // Skip if a confirmation modal gates this form — the submit is about
+            // to be preventDefault()ed, and the overlay (z-index 9999) would
+            // cover the modal (Bootstrap uses 1055), leaving a stuck spinner
+            // over an unclickable dialog. The modal's Confirm button shows the
+            // overlay instead.
+            if (form.hasAttribute('data-confirm-message')) return;
             var msg = form.getAttribute('data-loading') || 'Loading...';
             window.showLoading(msg);
         });
@@ -115,6 +121,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
         modalBtn.addEventListener('click', function () {
             if (pendingForm) {
+                // Now that the action is confirmed, raise the overlay. form.submit()
+                // below does not fire submit listeners, so the data-loading handler
+                // never runs for these forms — show it here instead.
+                if (pendingForm.hasAttribute('data-loading')) {
+                    window.showLoading(pendingForm.getAttribute('data-loading') || 'Loading...');
+                }
                 // Remove the data-confirm-message temporarily so re-submit doesn't loop
                 const msg = pendingForm.getAttribute('data-confirm-message');
                 pendingForm.removeAttribute('data-confirm-message');
