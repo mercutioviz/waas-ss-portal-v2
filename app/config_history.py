@@ -6,6 +6,8 @@ payload_before through the matching WaasClient write method.
 from datetime import datetime
 from app import db
 from app.models import ConfigSnapshot, AuditLog
+from app.config_apply import apply_config, apply_succeeded, apply_error_summary
+from app.waas_client import WaasApiError
 
 IMPORT_REPLAY_TYPES = {'template_apply', 'raw_config_apply', 'template_bulk_apply', 'raw_config_bulk_apply'}
 
@@ -31,7 +33,16 @@ def revert_snapshot(snapshot, client, user_id):
     app_id = snapshot.app_id
 
     if snapshot.resource_type in IMPORT_REPLAY_TYPES:
-        client.import_application(app_id, payload_before, include_servers=True, include_endpoints=True)
+        # Route by key, same as the forward apply: payload_before may carry
+        # section-only settings (protection_mode and friends) that /import/
+        # rejects. Snapshots taken before capture_before() existed simply have
+        # no such keys and still replay as a single import call.
+        results = apply_config(
+            client, app_id, payload_before,
+            include_servers=True, include_endpoints=True,
+        )
+        if not apply_succeeded(results):
+            raise WaasApiError(f'Revert failed: {apply_error_summary(results)}')
 
     elif snapshot.resource_type == 'security_config_update':
         method_name = SECTION_UPDATE_METHODS.get(snapshot.section)

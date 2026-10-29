@@ -13,6 +13,7 @@ from app.models import (
 )
 from app.forms import FeatureForm, FeatureFromAppForm
 from app.waas_client import WaasClient, WaasApiError
+from app.config_apply import apply_config, apply_succeeded, apply_error_summary, capture_before
 from app import limiter
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,11 @@ def apply_feature_to_app(client, feature, app_id):
 
     For /endpoints/ targets, merges feature config on top of the current
     endpoint config so we don't clobber user's cipher suites, PFS, etc.
+
+    Returns a list of per-part result dicts (see app.config_apply). Configs
+    aimed at /import/ are split by key first: raw configs built by
+    save_as_feature inherit the default /import/ endpoint but may hold
+    section-only keys like protection_mode, which that endpoint rejects.
     """
     payload = feature.config_dict
 
@@ -72,7 +78,15 @@ def apply_feature_to_app(client, feature, app_id):
         except WaasApiError:
             pass  # proceed with feature payload as-is
 
-    return client.call_api(feature.api_method, feature.api_endpoint, app_id, payload)
+    if feature.api_endpoint.endswith('/import/'):
+        return apply_config(client, app_id, payload)
+
+    # Explicit single-endpoint target (the predefined raw configs): one part.
+    try:
+        client.call_api(feature.api_method, feature.api_endpoint, app_id, payload)
+        return [{'part': feature.name, 'success': True, 'error': None}]
+    except WaasApiError as e:
+        return [{'part': feature.name, 'success': False, 'error': str(e)}]
 
 
 CATEGORY_BADGES = {
@@ -386,9 +400,15 @@ def apply_feature(feature_id, account_id, app_id):
         return redirect(url_for('features.view_feature', feature_id=feature_id))
 
     try:
-        payload_before = client.get_application(app_id)
-        apply_feature_to_app(client, feature, app_id)
+        payload_before = capture_before(client, app_id, feature.config_dict)
+    except WaasApiError as e:
+        flash(_('Failed to apply raw config to "%(app_id)s": %(error)s', app_id=app_id, error=str(e)), 'danger')
+        return redirect(url_for('applications.view_application', account_id=account_id, app_id=app_id))
 
+    results = apply_feature_to_app(client, feature, app_id)
+    wrote_something = any(r['success'] for r in results)
+
+    if wrote_something:
         ConfigSnapshot.record(
             user_id=current_user.id,
             account_id=account.id,
@@ -416,18 +436,28 @@ def apply_feature(feature_id, account_id, app_id):
             db.session.add(fa)
         db.session.commit()
 
-        AuditLog.log(
-            user_id=current_user.id,
-            action='feature_apply',
-            resource_type='feature',
-            resource_id=feature.id,
-            details=f'Applied feature "{feature.name}" to app {app_id} (account: {account.account_name})',
-            ip_address=request.remote_addr,
-        )
+    error_summary = apply_error_summary(results)
+    AuditLog.log(
+        user_id=current_user.id,
+        action='feature_apply',
+        resource_type='feature',
+        resource_id=feature.id,
+        details=(
+            f'Applied feature "{feature.name}" to app {app_id} '
+            f'(account: {account.account_name})'
+            + (f' — failed: {error_summary}' if error_summary else '')
+        ),
+        ip_address=request.remote_addr,
+    )
 
+    if apply_succeeded(results):
         flash(_('Raw config "%(name)s" applied to "%(app_id)s" successfully.', name=feature.name, app_id=app_id), 'success')
-    except WaasApiError as e:
-        flash(_('Failed to apply raw config to "%(app_id)s": %(error)s', app_id=app_id, error=str(e)), 'danger')
+    elif wrote_something:
+        flash(_('Raw config "%(name)s" partially applied to "%(app_id)s". Failed: %(error)s',
+                name=feature.name, app_id=app_id, error=error_summary), 'warning')
+    else:
+        flash(_('Failed to apply raw config to "%(app_id)s": %(error)s',
+                app_id=app_id, error=error_summary or _('nothing to apply')), 'danger')
 
     return redirect(url_for('applications.view_application', account_id=account_id, app_id=app_id))
 
@@ -471,8 +501,13 @@ def bulk_apply(feature_id):
                 continue
 
             try:
-                payload_before = client.get_application(app_name)
-                apply_feature_to_app(client, feature, app_name)
+                payload_before = capture_before(client, app_name, feature.config_dict)
+            except WaasApiError as e:
+                results.append({'app': app_name, 'account': account.account_name, 'success': False, 'error': str(e)})
+                continue
+
+            parts = apply_feature_to_app(client, feature, app_name)
+            if any(p['success'] for p in parts):
                 ConfigSnapshot.record(
                     user_id=current_user.id,
                     account_id=account.id,
@@ -498,9 +533,13 @@ def bulk_apply(feature_id):
                         applied_by=current_user.id,
                     )
                     db.session.add(fa)
-                results.append({'app': app_name, 'account': account.account_name, 'success': True, 'error': None})
-            except WaasApiError as e:
-                results.append({'app': app_name, 'account': account.account_name, 'success': False, 'error': str(e)})
+            results.append({
+                'app': app_name,
+                'account': account.account_name,
+                'success': apply_succeeded(parts),
+                'error': apply_error_summary(parts),
+                'parts': parts,
+            })
 
         db.session.commit()
 

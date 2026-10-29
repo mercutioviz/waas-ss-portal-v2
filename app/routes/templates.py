@@ -10,6 +10,7 @@ from app import db
 from app.models import WaasAccount, AuditLog, ConfigTemplate, TemplateApplication, ConfigSnapshot, get_user_accounts, get_account_for_user, can_write
 from app.forms import ConfigTemplateForm, TemplateFromAppForm
 from app.waas_client import WaasClient, WaasApiError
+from app.config_apply import apply_config, apply_succeeded, apply_error_summary, capture_before
 from app import limiter
 
 logger = logging.getLogger(__name__)
@@ -326,14 +327,22 @@ def apply_template(template_id, account_id, app_id):
     include_endpoints = request.form.get('include_endpoints') == 'on'
 
     try:
-        payload_before = client.get_application(app_id)
-        client.import_application(
-            app_id,
-            template.config_dict,
-            include_servers=include_servers,
-            include_endpoints=include_endpoints
-        )
+        payload_before = capture_before(client, app_id, template.config_dict)
+    except WaasApiError as e:
+        flash(_('Failed to apply template to "%(app_id)s": %(error)s', app_id=app_id, error=str(e)), 'danger')
+        return redirect(url_for('applications.view_application', account_id=account_id, app_id=app_id))
 
+    # Parts are routed to their own endpoints and attempted independently, so
+    # record the snapshot whenever anything was written — a partial apply still
+    # needs to be rollback-able.
+    results = apply_config(
+        client, app_id, template.config_dict,
+        include_servers=include_servers,
+        include_endpoints=include_endpoints,
+    )
+    wrote_something = any(r['success'] for r in results)
+
+    if wrote_something:
         ConfigSnapshot.record(
             user_id=current_user.id,
             account_id=account.id,
@@ -357,18 +366,28 @@ def apply_template(template_id, account_id, app_id):
             ))
         db.session.commit()
 
-        AuditLog.log(
-            user_id=current_user.id,
-            action='template_apply',
-            resource_type='config_template',
-            resource_id=template.id,
-            details=f'Applied template "{template.name}" to app {app_id} (account: {account.account_name})',
-            ip_address=request.remote_addr
-        )
+    error_summary = apply_error_summary(results)
+    AuditLog.log(
+        user_id=current_user.id,
+        action='template_apply',
+        resource_type='config_template',
+        resource_id=template.id,
+        details=(
+            f'Applied template "{template.name}" to app {app_id} '
+            f'(account: {account.account_name})'
+            + (f' — failed: {error_summary}' if error_summary else '')
+        ),
+        ip_address=request.remote_addr
+    )
 
+    if apply_succeeded(results):
         flash(_('Template "%(name)s" applied to "%(app_id)s" successfully.', name=template.name, app_id=app_id), 'success')
-    except WaasApiError as e:
-        flash(_('Failed to apply template to "%(app_id)s": %(error)s', app_id=app_id, error=str(e)), 'danger')
+    elif wrote_something:
+        flash(_('Template "%(name)s" partially applied to "%(app_id)s". Failed: %(error)s',
+                name=template.name, app_id=app_id, error=error_summary), 'warning')
+    else:
+        flash(_('Failed to apply template to "%(app_id)s": %(error)s',
+                app_id=app_id, error=error_summary or _('nothing to apply')), 'danger')
 
     return redirect(url_for('applications.view_application', account_id=account_id, app_id=app_id))
 
@@ -454,13 +473,17 @@ def bulk_apply(template_id):
                 continue
 
             try:
-                payload_before = client.get_application(app_name)
-                client.import_application(
-                    app_name,
-                    template.config_dict,
-                    include_servers=include_servers,
-                    include_endpoints=include_endpoints
-                )
+                payload_before = capture_before(client, app_name, template.config_dict)
+            except WaasApiError as e:
+                results.append({'app': app_name, 'account': account.account_name, 'success': False, 'error': str(e)})
+                continue
+
+            parts = apply_config(
+                client, app_name, template.config_dict,
+                include_servers=include_servers,
+                include_endpoints=include_endpoints,
+            )
+            if any(p['success'] for p in parts):
                 ConfigSnapshot.record(
                     user_id=current_user.id,
                     account_id=account.id,
@@ -471,7 +494,6 @@ def bulk_apply(template_id):
                     payload_applied=template.config_dict,
                     batch_id=batch_id
                 )
-                results.append({'app': app_name, 'account': account.account_name, 'success': True, 'error': None})
                 ta = TemplateApplication.query.filter_by(
                     template_id=template.id, account_id=acct_id, app_name=app_name
                 ).first()
@@ -483,8 +505,13 @@ def bulk_apply(template_id):
                         template_id=template.id, account_id=acct_id,
                         app_name=app_name, applied_by=current_user.id
                     ))
-            except WaasApiError as e:
-                results.append({'app': app_name, 'account': account.account_name, 'success': False, 'error': str(e)})
+            results.append({
+                'app': app_name,
+                'account': account.account_name,
+                'success': apply_succeeded(parts),
+                'error': apply_error_summary(parts),
+                'parts': parts,
+            })
 
         db.session.commit()
         success_count = sum(1 for r in results if r['success'])

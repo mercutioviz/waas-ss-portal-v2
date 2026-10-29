@@ -67,12 +67,30 @@
                         <td>
                             {% if r.success %}
                             <span class="badge bg-success"><i class="bi bi-check-circle"></i> {{ _('Success') }}</span>
+                            {% elif r.parts and r.parts | selectattr('success') | list %}
+                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> {{ _('Partial') }}</span>
                             {% else %}
                             <span class="badge bg-danger"><i class="bi bi-x-circle"></i> {{ _('Failed') }}</span>
                             {% endif %}
                         </td>
                         <td>
-                            {% if r.error %}
+                            {% if r.parts %}
+                            {# Per-section outcome: a config is applied across several
+                               endpoints, and one failing section does not stop the rest. #}
+                            <ul class="list-unstyled mb-0 small">
+                                {% for p in r.parts %}
+                                <li>
+                                    {% if p.success %}
+                                    <i class="bi bi-check-circle text-success"></i>
+                                    <span class="text-muted">{{ p.part }}</span>
+                                    {% else %}
+                                    <i class="bi bi-x-circle text-danger"></i>
+                                    <span class="text-danger">{{ p.part }}: {{ p.error }}</span>
+                                    {% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            {% elif r.error %}
                             <span class="text-danger">{{ r.error }}</span>
                             {% else %}
                             <span class="text-muted">-</span>

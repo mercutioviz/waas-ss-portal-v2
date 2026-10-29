@@ -6,6 +6,7 @@ import pytest
 
 from app.config_history import revert_snapshot
 from app.models import AuditLog, ConfigSnapshot, User, WaasAccount
+from app.waas_client import WaasApiError
 
 
 class StubClient:
@@ -135,6 +136,31 @@ class TestRevertSnapshotDispatch:
         assert payload == {'servers': [{'ip': '1.2.3.4'}]}
         assert include_servers is True
         assert include_endpoints is True
+
+    def test_import_replay_routes_section_keys_to_their_endpoints(
+            self, app, db, user, account, client_stub):
+        """A snapshot captured by capture_before() carries section-only keys
+        alongside the export document. Replaying the whole thing through
+        /import/ would 400 on protection_mode, so revert routes by key too."""
+        snap = self._snap(db, user, account, payload_before={
+            'protection_mode': 'Passive',
+            'request_limits': {'enabled': True},
+        })
+        revert_snapshot(snap, client_stub, user.id)
+
+        by_name = {c[0]: c for c in client_stub.calls}
+        assert by_name['update_security_config'][2] == {'protection_mode': 'Passive'}
+        assert by_name['import_application'][2] == {'request_limits': {'enabled': True}}
+
+    def test_import_replay_raises_when_a_part_fails(
+            self, app, db, user, account, client_stub):
+        def boom(app_id, payload):
+            raise WaasApiError('section write refused')
+        client_stub.update_security_config = boom
+
+        snap = self._snap(db, user, account, payload_before={'protection_mode': 'Passive'})
+        with pytest.raises(WaasApiError):
+            revert_snapshot(snap, client_stub, user.id)
 
     @pytest.mark.parametrize('section,method_name', [
         ('basic_security', 'update_security_config'),
