@@ -4,12 +4,23 @@ This file provides guidance to Claude Code when working in this repository.
 
 ## What v2 is
 
-A parallel rewrite / overhaul of the WaaS Self-Service Portal. It runs alongside v1 on the same host without affecting it. Both portals talk to the same upstream Barracuda WaaS API — they only differ in the portal-local layer (UI, workflows, portal DB, dashboards).
+**v2 is the WaaS Self-Service Portal.** It is no longer a parallel rewrite running
+beside v1 — since the cutover on **2026-11-20** it serves every portal hostname and
+v1 is decommissioned. Full record in `docs/CUTOVER.md`.
 
-- **v1 (prod):** `/home/admin/waas-ss-portal`, `https://ssportal.waaslab.com` — do not touch.
-- **v2 (this repo):** `/home/admin/waas-ss-portal-v2`, `https://v2.ssportal.waaslab.com` — active development.
+- **v2 (this repo, prod):** `/home/admin/waas-ss-portal-v2`. Answers on
+  `v2.ssportal.waaslab.com`, `ssportal.waaslab.com`, `portal.waaslab.com` and the
+  nginx `_` catch-all — all the same app. The `v2.` prefix is the one people use;
+  retiring it needs a WaaS edge change upstream of this host.
+- **v1 (decommissioned):** `/home/admin/waas-ss-portal`. Service stopped and
+  disabled, nginx site disabled, archived to
+  `/home/admin/archives/waas-ss-portal-v1-2026-11-20/`. The tree is kept as a
+  rollback window and is **scheduled for deletion on or after 2026-12-20** — after
+  that date it is gone and the archive is the only copy on this host (the code also
+  lives at `github.com/mercutioviz/waas-ss-portal` at `304026a`).
 
-v2 was seeded from v1 on 2026-08-12 as a working baseline. From this point on the two codebases diverge — v2 is where the overhaul happens.
+v2 was seeded from v1 on 2026-08-12 and the two diverged from there; v2's database
+has been the live one ever since. Nothing was migrated out of v1's DB at cutover.
 
 ## Overhaul goals (top-5 target features)
 
@@ -31,7 +42,7 @@ record of what v2 set out to do, not a to-do list.
 ```bash
 cd /home/admin/waas-ss-portal-v2
 source venv/bin/activate
-python3 run.py                   # Dev mode on 0.0.0.0:5000 — conflicts with v1 dev server if both running
+python3 run.py                   # Dev mode on 0.0.0.0:5000
 ```
 
 **In production (systemd):**
@@ -45,30 +56,50 @@ sudo journalctl -u waas-portal-v2 -f
 
 The `app.waas_client` logger runs at INFO in production and DEBUG only under `app.debug`. Do not pin it back to DEBUG unconditionally: at DEBUG it logs full request headers and 500 characters of every response body, which during a log pull is customer traffic data at hundreds of lines per minute.
 
-**URL:** https://v2.ssportal.waaslab.com (self-signed cert).
+**URL:** https://v2.ssportal.waaslab.com (self-signed cert). `ssportal.waaslab.com` and `portal.waaslab.com` reach the same app; see "Hostnames" below.
 
-## v2-specific paths & names
+## Paths & names
 
-| Thing | v1 | v2 |
-|-------|----|----|
-| Working directory | `/home/admin/waas-ss-portal` | `/home/admin/waas-ss-portal-v2` |
-| Hostname | `ssportal.waaslab.com` | `v2.ssportal.waaslab.com` |
-| Unix socket | `waas-portal.sock` | `waas-portal-v2.sock` |
-| systemd unit | `waas-portal.service` | `waas-portal-v2.service` |
-| nginx site | `/etc/nginx/sites-enabled/ssportal.waaslab.com` | `/etc/nginx/sites-enabled/v2.ssportal.waaslab.com` |
-| TLS cert | `/etc/ssl/self-signed/ssportal.waaslab.com.{crt,key}` | `/etc/ssl/self-signed/v2.ssportal.waaslab.com.{crt,key}` |
-| SQLite DB | `instance/waas-portal.db` | `instance/waas-portal-v2.db` |
-| DB URL env | (default) | `DATABASE_URL=sqlite:////home/admin/waas-ss-portal-v2/instance/waas-portal-v2.db` |
-| Gunicorn proc_name | `waas-portal` | `waas-portal-v2` |
-| SECRET_KEY | (systemd env) | (systemd env — same value as v1 so Fernet-encrypted API keys in the DB snapshot still decrypt) |
+| Thing | Value |
+|-------|-------|
+| Working directory | `/home/admin/waas-ss-portal-v2` |
+| Hostnames | `v2.ssportal.waaslab.com`, `ssportal.waaslab.com`, `portal.waaslab.com`, nginx `_` catch-all |
+| Unix socket | `waas-portal-v2.sock` |
+| systemd unit | `waas-portal-v2.service` |
+| nginx site | `/etc/nginx/sites-enabled/v2.ssportal.waaslab.com` → `sites-available/`; source of truth is `deploy/nginx/` in this repo |
+| TLS cert | `/etc/ssl/self-signed/v2.ssportal.waaslab.com.{crt,key}` |
+| SQLite DB | `instance/waas-portal-v2.db` |
+| DB URL env | `DATABASE_URL=sqlite:////home/admin/waas-ss-portal-v2/instance/waas-portal-v2.db` |
+| Gunicorn proc_name | `waas-portal-v2` |
+| SECRET_KEY | (systemd env) — still the inherited `dev-secret-key-change-in-production`. It derives the Fernet key for stored API keys, so **rotating it makes every stored credential undecryptable** unless they are decrypted with the old key and re-encrypted with the new one in one operation. |
 
-## Isolation rules
+### Hostnames
 
-- **Never edit anything under `/home/admin/waas-ss-portal/`.** v1 is prod. Read-only reference only.
-- **Never touch `/etc/systemd/system/waas-portal.service`** (v1 unit) or `/etc/nginx/sites-enabled/ssportal.waaslab.com` (v1 nginx site). Only `waas-portal-v2.*` is fair game.
-- **Do not share the DB.** v2 has its own snapshot; they will diverge.
-- Both portals hit the same real WaaS API upstream. Be aware that write operations you make from v2 (create app, edit rule, apply template) will affect real WaaS accounts and are visible in v1 too.
-- If you need a v1 detail for reference, `grep`/`Read` from `/home/admin/waas-ss-portal/` is fine — just don't write there.
+All four names serve this same app; none of them redirect. `portal.waaslab.com` is
+in the nginx `server_name` list deliberately — the **WaaS edge rewrites the Host
+header**, so a request a user sends to `ssportal.waaslab.com` arrives at this origin
+as `Host: portal.waaslab.com`. `/var/log/nginx/debug-host.log` is the only log that
+records `$host`, so it is the one to check when hostname routing is in question.
+
+v2's block also holds `default_server` for `:80` and `:443`. Only one block may, so
+anything that adds a competing `default_server` will make `nginx -t` fail.
+
+## Rules
+
+- **`/home/admin/waas-ss-portal/` (v1) is decommissioned, not prod.** Still don't
+  edit it — it exists only as the rollback window until 2026-12-20, and changes to
+  it are pointless rather than dangerous. `grep`/`Read` for reference is fine.
+- **Don't re-enable `waas-portal.service` or the disabled v1 nginx site**
+  (`/etc/nginx/sites-available/ssportal.waaslab.com.disabled-2026-11-20`) without
+  reading `docs/CUTOVER.md` first. Both reclaim hostnames v2 now holds, and the
+  duplicate `default_server` will stop nginx from loading.
+- **Confirm before touching systemd, nginx, or `/etc/`.** Changes to the nginx site
+  go in `deploy/nginx/` first, then get installed from there — don't hand-edit
+  `/etc/nginx/sites-available/` and leave the repo stale.
+- Reload nginx (`systemctl reload nginx`), don't restart it — long-running log pulls
+  and SocketIO sessions survive a reload.
+- v2 writes against the **real upstream WaaS API**. Creating an app, editing a rule,
+  or applying a template affects live customer accounts.
 
 ## Architecture (inherited from v1)
 
@@ -171,13 +202,20 @@ Bootstrap 5.3.3 + Bootstrap Icons 1.11.3 (CDN). Templates extend `base.html`. Ca
 
 v2 may replace or overhaul the frontend as part of the redesign — decisions to be made per feature.
 
-## Migration path (for future reference)
+## Migration path — done
 
-When v2 reaches feature parity + the new features:
-1. Snapshot v1 DB into v2 one more time at cutover.
-2. Optionally, build an "import from v1" wizard.
-3. Redirect `ssportal.waaslab.com` → `v2.ssportal.waaslab.com`, or swap the systemd/nginx names.
-4. Keep v1 disabled but present for ~30 days as rollback.
+Completed 2026-11-20. Steps 1 and 2 (snapshot v1's DB, build an import wizard) were
+dropped as unnecessary: v2's database had been the live one since 2026-08-12 and was
+ahead of v1's, which by then held four-month-old data nobody wanted. Step 3 was done
+by having v2 answer on every hostname rather than by redirecting. Step 4 (v1 disabled
+but present ~30 days) is in effect until **2026-12-20**.
+
+See `docs/CUTOVER.md` for what was done and how to roll it back.
+
+**Open after cutover:** `SECRET_KEY` is still the dev default; the TLS cert covers
+only `v2.ssportal.waaslab.com` (a SAN cert for all three names is staged at
+`/home/admin/staged-certs/`); retiring the `v2.` prefix needs a WaaS edge change.
+Details under "Known limitations" in `CHANGELOG.md`.
 
 ## Notes for Claude in this repo
 

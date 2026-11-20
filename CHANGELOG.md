@@ -6,6 +6,80 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Cutover — v2 is now the production portal (2026-11-20)
+
+v2 took over every portal hostname; v1 is archived and decommissioned. Full
+record in `docs/CUTOVER.md`.
+
+v1 had been inactive since 2026-07-14 and was returning 502 to the ~148 bot
+requests that still reached the old hostname, so there was no live service to
+drain and no maintenance window. **No data was migrated** — v2's database has
+been the live one since 2026-08-12 and is ahead of v1's in every respect.
+
+- v1 archived to `/home/admin/archives/waas-ss-portal-v1-2026-11-20/` (4.6 MB):
+  tree tarball minus `venv/`, SQLite DB via the backup API (`integrity_check:
+  ok`), deployed systemd unit and nginx site, TLS keypair, v2's pre-cutover
+  nginx site, `SHA256SUMS`, and a `MANIFEST.md` describing all of it. v1's git
+  tree was clean and fully pushed to `mercutioviz/waas-ss-portal` at `304026a`.
+- `waas-portal.service` stopped and disabled. The unit file and
+  `/home/admin/waas-ss-portal` are kept as a rollback window and are
+  **scheduled for deletion on or after 2026-12-20**.
+- v2's nginx block now answers for `v2.ssportal.waaslab.com`,
+  `ssportal.waaslab.com`, `portal.waaslab.com` and the `_` catch-all, and holds
+  `default_server` for `:80` and `:443`. `portal.waaslab.com` is listed
+  deliberately — the WaaS edge rewrites the Host header, so old-hostname
+  requests arrive under that name.
+- v1's nginx site moved to
+  `/etc/nginx/sites-available/ssportal.waaslab.com.disabled-2026-11-20`.
+- nginx reloaded rather than restarted (a user was mid-session); the v2 app
+  service was not touched.
+
+### Fixed
+
+- **nginx no longer caps v2 requests at 60s.** `location /` had no
+  `proxy_read_timeout`, so the 60s default applied and gunicorn's 120s timeout
+  could never fire — slow endpoints returned a 504 *HTML* page that broke
+  callers expecting JSON. Now `proxy_read_timeout` / `proxy_send_timeout` are
+  180s, above gunicorn's 120s, so gunicorn times out first and the app's own
+  error handling produces the response. `/socket.io/` and `/vnc/` keep 86400s.
+  This resolves the second "Also of note" item under v2.0.0's known limitations.
+- Applying a template sent every section to `/import/`, which rejects on the
+  first unrecognised key — three of the four components `get_security_config()`
+  produces have no counterpart in the import schema, so the apply failed with
+  400 and wrote nothing. Each section now goes to the endpoint that owns it
+  (`f04e9a0`).
+- Bulk pages carrying both `data-loading` and `data-confirm-message` opened the
+  confirm modal *underneath* the loading overlay, so bulk template apply
+  appeared to hang forever and never issued the POST (`708c131`).
+
+### Added
+
+- `deploy/nginx/v2.ssportal.waaslab.com` — the nginx site is now
+  version-controlled, matching the `deploy/logrotate/` pattern.
+- `docs/CUTOVER.md`.
+
+### Known limitations
+
+- **`SECRET_KEY` is still `dev-secret-key-change-in-production`** on both units.
+  It derives the Fernet key for stored WaaS API keys, so rotating it makes every
+  stored credential undecryptable unless they are decrypted with the old key and
+  re-encrypted with the new one in a single operation. Left alone during the
+  cutover rather than risk breaking working credentials; worth scheduling
+  deliberately, with a DB backup first.
+- **The TLS cert still covers only `v2.ssportal.waaslab.com`.** Harmless for
+  normal traffic — the edge reaches this origin over plain HTTP on `:80` — but
+  direct-to-origin HTTPS on the other two names gives a name mismatch on an
+  already self-signed cert. A SAN cert for all three names is staged at
+  `/home/admin/staged-certs/waas-portal-multi.{crt,key}`; installing it needs
+  write access to `/etc/ssl/self-signed/`.
+- **The `v2.` prefix was not retired.** Making `ssportal.waaslab.com` the sole
+  canonical name needs a WaaS edge application change, which is upstream of this
+  host.
+
+---
+
 ## [v2.0.0] — 2026-10-20
 
 First tagged release of v2. Marks the point where all five overhaul goals have
