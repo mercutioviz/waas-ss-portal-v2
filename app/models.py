@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from app import db
 
 
@@ -1017,6 +1017,45 @@ class LogPull(db.Model):
     )
     #: Statuses that still occupy the single pull slot.
     ACTIVE_STATUSES = (STATUS_PENDING, STATUS_RUNNING)
+
+    #: One active *standalone* pull, enforced by the database rather than by
+    #: the route that checks first and inserts later. `wsgi.py` monkey-patches
+    #: gevent, and `create_pull` yields the event loop inside `preflight()`
+    #: between its `active_pull()` check and this INSERT — so two overlapping
+    #: submissions can both pass the check. A partial unique index over a
+    #: constant makes the second INSERT fail instead; routes/traffic.py
+    #: translates that into the same "already running" message.
+    #:
+    #: **Scoped to `comparison_id IS NULL` on purpose.** A comparison arms all
+    #: of its immediately-collectable windows at once, as several child rows in
+    #: STATUS_PENDING, and drains them one at a time — so pending children are
+    #: a queue, not concurrent work, and a blanket index would make arming any
+    #: comparison with more than one settled window fail outright.
+    #:
+    #: Mutual exclusion *between* a comparison and a standalone pull is kept
+    #: where it belongs, in the application: `create_pull` refuses while any
+    #: pull is active (children included), and `run_due_comparisons` refuses
+    #: to start while any pull holds the slot. Neither of those races itself —
+    #: the scheduler is a single job — so only the standalone path needs a
+    #: database backstop.
+    #:
+    #: Declared here as well as in migration e5b2c70f41aa because `wsgi.py`
+    #: calls `db.create_all()` at import: a deployment created from the models
+    #: rather than from migrations would otherwise have no index at all.
+    #:
+    #: The WHERE clause must list exactly ACTIVE_STATUSES; both are built from
+    #: the same constants below so they cannot drift apart.
+    __table_args__ = (
+        db.Index(
+            'ix_log_pulls_single_active',
+            text('1'),
+            unique=True,
+            sqlite_where=text(
+                'comparison_id IS NULL AND status IN (' + ', '.join(
+                    f"'{s}'" for s in (STATUS_PENDING, STATUS_RUNNING)) + ')'
+            ),
+        ),
+    )
 
     PHASE_QUEUED = 'queued'
     PHASE_COUNTING = 'counting'

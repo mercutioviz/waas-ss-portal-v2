@@ -36,6 +36,62 @@ been the live one since 2026-08-12 and is ahead of v1's in every respect.
 - nginx reloaded rather than restarted (a user was mid-session); the v2 app
   service was not touched.
 
+### Added — nightly database backups (2026-11-23)
+
+Nothing was backing up the production database. The only copy on disk was a
+manual `.bak` from 2026-10-07, taken when the database was a fifth its current
+size. Full detail in `docs/BACKUPS.md`.
+
+- `scripts/backup_db.py`, run by `waas-portal-v2-backup.timer` at 02:41.
+  Two artifacts from one snapshot: the whole database gzipped (~50 MB, kept 14)
+  and a SQL dump of everything except regenerable caches (~300 KB, kept 90).
+  ~95% of the database is `security_metric_snapshots`, which the hourly capture
+  job rebuilds by itself, so the small artifact is the one worth keeping for a
+  quarter.
+- Runs as a systemd timer rather than in APScheduler: copying 230 MB inside the
+  single gevent worker would stall every request for ten seconds, and a backup
+  that only runs while the app is healthy is the wrong shape. This host has no
+  cron despite the leftovers in `/etc/cron.d`.
+- Uses the SQLite backup API, not `cp` — the database is in WAL mode and under
+  write. Every snapshot is `integrity_check`ed before compression.
+- Both restore paths exercised end to end, including confirming all 12
+  accounts' API keys decrypt out of a restored core dump.
+
+### Fixed — one active log pull, enforced by the database (2026-11-23)
+
+`create_pull` and `resume_pull` already refused to start while another pull was
+active, so the v2.0.0 note claiming pulls were "not serialized" was out of date.
+The real gap was narrower and harder to see: the check is check-then-act across
+a gevent yield. `wsgi.py` calls `monkey.patch_all()`, and `create_pull` runs
+`preflight()` — which talks to the WaaS API — between its `active_pull()` check
+and its INSERT. Two overlapping submissions could both pass.
+
+- Migration `e5b2c70f41aa` adds a partial unique index permitting one active
+  standalone pull. `_claim_pull_slot()` turns the resulting `IntegrityError`
+  into the same "already running" message, rather than a 500.
+- The index is **scoped to `comparison_id IS NULL`**. A comparison arms every
+  immediately-collectable window at once as several `pending` children and
+  drains them sequentially, so pending children are a queue, not contention.
+  The first draft of the index omitted this and broke arming outright; 20 tests
+  in `test_traffic_comparison.py` caught it.
+- Declared on the model as well as in the migration, because `wsgi.py` calls
+  `db.create_all()` at import and a deployment built that way would otherwise
+  have no index at all.
+
+### Added — route-level coverage for template apply (2026-11-23)
+
+`config_snapshots` was empty in production a month after config history
+shipped. The cause was benign — every template apply failed before `f04e9a0`,
+so `wrote_something` was never true — but nothing tested the route that records
+the snapshot, only the module it calls.
+
+- `tests/test_template_apply_route.py`: 13 tests covering snapshot recorded on
+  success, on partial success, and *not* recorded when every part fails or the
+  pre-state can't be read; section routing; permissions.
+- The stub rejects keys `/import/` does not accept, so a test cannot pass
+  against a payload the live API would have refused. Verified by reverting
+  `f04e9a0` locally: 7 of the 13 fail, including the snapshot ones.
+
 ### Fixed
 
 - **nginx no longer caps v2 requests at 60s.** `location /` had no
@@ -62,6 +118,14 @@ been the live one since 2026-08-12 and is ahead of v1's in every respect.
 
 ### Known limitations
 
+- **Backups are local-only.** They sit on the same filesystem as the database,
+  so they cover a bad migration or an accidental delete but not loss of the
+  host. An off-host copy was deliberately deferred; the push step is the
+  obvious next addition.
+- **Two concurrent comparison armings are still unserialized.** Each creates
+  its own set of child rows, which the index deliberately does not constrain.
+  The scheduler that drains them is a single job, so they queue rather than
+  collide — but nothing stops two users arming at the same moment.
 - **`SECRET_KEY` is still `dev-secret-key-change-in-production`** on both units.
   It derives the Fernet key for stored WaaS API keys, so rotating it makes every
   stored credential undecryptable unless they are decrypted with the old key and

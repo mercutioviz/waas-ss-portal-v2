@@ -395,6 +395,11 @@ not a defect. Carried into `CHANGELOG.md` under "Known limitations".
    threshold, or allow with a typed confirmation? *Today: neither — the
    pre-flight estimate is the only guard.*
 2. **Concurrent pulls.** One worker, one event loop — recommend serializing to
-   one active pull at a time, queueing the rest. *Today: not serialized.*
+   one active pull at a time, queueing the rest. ~~*Today: not serialized.*~~
+   **Resolved 2026-11-23.** The routes already refused to start a second pull;
+   what was missing was anything stopping two requests racing past that check
+   across a gevent yield. Migration `e5b2c70f41aa` adds a partial unique index
+   permitting one active standalone pull, scoped to exclude a comparison's
+   queued child windows. Refuse-and-point rather than queue — see `CHANGELOG.md`.
 3. **Scheduled/recurring pulls.** APScheduler is already present. Worth it, or
    on-demand only for v1? *Today: on-demand only.*

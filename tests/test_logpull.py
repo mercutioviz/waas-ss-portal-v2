@@ -12,7 +12,7 @@ import gzip
 import importlib
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -696,9 +696,28 @@ class TestRetentionSweep:
 class TestReconcileOnStartup:
     def test_marks_stale_running_pulls_interrupted(self, app, db, user, account):
         """A row still claiming to be running after a restart is lying — the
-        greenlet died with the process."""
+        greenlet died with the process.
+
+        The stale pending row is a comparison child, because that is the only
+        way two active rows coexist: `ix_log_pulls_single_active` permits one
+        active standalone pull, and a comparison's queued windows sit outside
+        it. A crash mid-comparison leaves exactly this shape.
+        """
+        from app.models import TrafficComparison
+
+        comparison = TrafficComparison(
+            user_id=user.id, account_id=account.id,
+            app_id='app-1.example.com', app_name='app-1.example.com',
+            change_at=datetime.now(timezone.utc), duration_seconds=7200,
+            guard_seconds=180, control_days=3, session_id='cmp-stale',
+            status=TrafficComparison.STATUS_COLLECTING,
+        )
+        db.session.add(comparison)
+        db.session.commit()
+
         running = make_pull(db, user, account, status=LogPull.STATUS_RUNNING)
-        pending = make_pull(db, user, account, status=LogPull.STATUS_PENDING)
+        pending = make_pull(db, user, account, status=LogPull.STATUS_PENDING,
+                            comparison_id=comparison.id, window_label='before')
         done = make_pull(db, user, account, status=LogPull.STATUS_COMPLETE)
 
         assert reconcile_interrupted_pulls(app) == 2
@@ -762,8 +781,13 @@ class TestTrafficRoutes:
         other.set_password('x')
         db.session.add(other)
         db.session.commit()
-        mine = make_pull(db, user, account, app_name='mine.example.com')
-        make_pull(db, other, account, app_name='theirs.example.com')
+        # Terminal status on both: this test is about whose pulls are listed,
+        # and two *active* standalone pulls cannot coexist under
+        # `ix_log_pulls_single_active`.
+        mine = make_pull(db, user, account, app_name='mine.example.com',
+                         status=LogPull.STATUS_COMPLETE)
+        make_pull(db, other, account, app_name='theirs.example.com',
+                  status=LogPull.STATUS_COMPLETE)
 
         resp = logged_in_client.get('/traffic/')
         assert resp.status_code == 200

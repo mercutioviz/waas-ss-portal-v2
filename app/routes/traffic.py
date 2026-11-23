@@ -21,6 +21,13 @@
 Only one pull runs at a time. The portal is a single gevent worker, so two
 concurrent multi-hour pulls would contend for one event loop and make the
 whole portal sluggish without finishing any sooner.
+
+That limit is enforced twice over. `active_pull()` checks before starting, which
+is what produces a readable message pointing at the running pull — but it is
+check-then-act across a gevent yield (`preflight()` makes API calls), so two
+overlapping submissions can both pass it. A partial unique index on `log_pulls`
+makes the second INSERT fail at the database instead; `_claim_pull_slot()`
+turns that failure back into the same message. See migration e5b2c70f41aa.
 """
 import uuid
 from datetime import datetime, timezone
@@ -37,6 +44,7 @@ from flask import (
 )
 from flask_babel import gettext as _
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 
 from app import db, socketio
 from app.background_tasks import (
@@ -111,6 +119,27 @@ def active_pull():
     return LogPull.query.filter(
         LogPull.status.in_(LogPull.ACTIVE_STATUSES)
     ).order_by(LogPull.created_at.desc()).first()
+
+
+class SlotTaken(Exception):
+    """Another pull claimed the single slot while this request was working."""
+
+
+def _claim_pull_slot():
+    """Commit the pending session changes, claiming the one active-pull slot.
+
+    The `ix_log_pulls_single_active` partial unique index permits one row in an
+    active status. Losing the race surfaces as IntegrityError on commit; that
+    is the expected outcome of a race, not a fault, so it is translated rather
+    than allowed to reach the error handler as a 500.
+
+    Raises SlotTaken if another pull already holds the slot.
+    """
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        raise SlotTaken()
 
 
 def _range_for(window_days, now=None):
@@ -385,7 +414,15 @@ def create_pull():
         phase=LogPull.PHASE_QUEUED,
     )
     db.session.add(pull)
-    db.session.commit()
+    try:
+        _claim_pull_slot()
+    except SlotTaken:
+        # Someone else's pull started while preflight was talking to the API.
+        existing = active_pull()
+        flash(_('A log pull started while this one was being sized. Only one '
+                'runs at a time — wait for it to finish or cancel it.'), 'warning')
+        return redirect(url_for('traffic.watch_pull', pull_id=existing.id)
+                        if existing else url_for('traffic.index'))
 
     AuditLog.log(
         user_id=current_user.id,
@@ -485,7 +522,14 @@ def resume_pull(pull_id):
     pull.cancel_requested = False
     pull.error_message = None
     pull.completed_at = None
-    db.session.commit()
+    try:
+        _claim_pull_slot()
+    except SlotTaken:
+        existing = active_pull()
+        flash(_('Another pull started just now. Only one runs at a time — '
+                'wait for it to finish, then resume this one.'), 'warning')
+        return redirect(url_for('traffic.watch_pull', pull_id=existing.id)
+                        if existing else url_for('traffic.index'))
 
     AuditLog.log(user_id=current_user.id, action='logpull_resume',
                  details=f'Resumed log pull #{pull.id} ({pull.app_name})')
