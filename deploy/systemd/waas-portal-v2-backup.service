@@ -1,0 +1,37 @@
+# Nightly database backup for the WaaS Self-Service Portal v2.
+#
+# Source of truth for /etc/systemd/system/waas-portal-v2-backup.service.
+# Install:
+#   sudo cp deploy/systemd/waas-portal-v2-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now waas-portal-v2-backup.timer
+#
+# Deliberately a separate unit rather than an APScheduler job inside the app:
+# copying a ~230 MB SQLite file inside the portal's single gevent worker would
+# stall every request for the duration, and a backup that only runs while the
+# app is healthy is the wrong shape.
+
+[Unit]
+Description=WaaS Portal v2 — nightly database backup
+Documentation=file:/home/admin/waas-ss-portal-v2/docs/BACKUPS.md
+
+[Service]
+Type=oneshot
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/waas-ss-portal-v2
+ExecStart=/home/admin/waas-ss-portal-v2/venv/bin/python scripts/backup_db.py
+
+# Output goes to the journal, matching the portal itself since 2026-10-03:
+#   journalctl -u waas-portal-v2-backup
+StandardOutput=journal
+StandardError=journal
+
+# The backup reads the live database and writes credential-bearing dumps.
+# Keep it off everything else it has no business touching.
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/home/admin/backups/waas-portal-v2
+ReadOnlyPaths=/home/admin/waas-ss-portal-v2
+NoNewPrivileges=true

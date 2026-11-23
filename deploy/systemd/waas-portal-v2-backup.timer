@@ -1,0 +1,25 @@
+# Schedule for waas-portal-v2-backup.service.
+#
+# Source of truth for /etc/systemd/system/waas-portal-v2-backup.timer.
+# Check it with:  systemctl list-timers waas-portal-v2-backup.timer
+
+[Unit]
+Description=Nightly database backup for WaaS Portal v2
+Documentation=file:/home/admin/waas-ss-portal-v2/docs/BACKUPS.md
+
+[Timer]
+# 02:41 sits clear of the app's own cleanup jobs, which run between 03:17 and
+# 03:57 — so the backup captures the day's data just before retention prunes
+# it, buying one extra day of grace on anything deleted by mistake.
+OnCalendar=*-*-* 02:41:00
+
+# A missed run (host down at 02:41) fires as soon as the machine is back,
+# rather than silently skipping a day. This is the whole point of a backup.
+Persistent=true
+
+# Keeps this host from hammering its disk at the same instant as every other
+# timer on a shared box.
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
